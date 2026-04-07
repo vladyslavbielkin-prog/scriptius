@@ -1,0 +1,32 @@
+# Secrets
+.env
+*.env
+google-credentials*.json
+*service-account*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift / Xcode
+.build/
+DerivedData/
+*.o
+*.d
+*.swp
+
+# IDE
+.idea/
+.vscode/settings.json
+
+# Claude Code (local settings only)
+.claude/

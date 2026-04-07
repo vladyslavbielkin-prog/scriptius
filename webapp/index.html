@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scriptius — Live Call Transcript</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>Scriptius</h1>
+      <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Idle</span>
+      </div>
+    </header>
+
+    <div class="controls">
+      <button id="btnStart" class="btn btn-start">&#9654; Start Capture</button>
+      <button id="btnStop" class="btn btn-stop" disabled>&#9632; Stop</button>
+    </div>
+
+    <div class="error-msg" id="errorMsg"></div>
+
+    <div class="levels">
+      <div class="level-group">
+        <div class="level-label">
+          <span>Client (system audio)</span>
+          <span class="level-value" id="systemValue">0.0000</span>
+        </div>
+        <div class="level-bar-bg">
+          <div class="level-bar system" id="systemBar"></div>
+        </div>
+      </div>
+      <div class="level-group">
+        <div class="level-label">
+          <span>Mic (sales)</span>
+          <span class="level-value" id="micValue">0.0000</span>
+        </div>
+        <div class="level-bar-bg">
+          <div class="level-bar mic" id="micBar"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="transcript-section">
+      <div class="transcript-header">
+        <div class="section-title">Транскрипт</div>
+        <span class="transcript-count" id="transcriptCount">0 реплік</span>
+      </div>
+      <div class="transcript-list" id="transcriptList">
+        <div class="transcript-empty" id="transcriptEmpty">Очікування на транскрипцію...</div>
+      </div>
+    </div>
+
+    <div class="connections">
+      <div class="conn-status">
+        <span class="conn-dot" id="agentDot"></span> Desktop Agent
+      </div>
+      <div class="conn-status">
+        <span class="conn-dot" id="backendDot"></span> STT Backend
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
