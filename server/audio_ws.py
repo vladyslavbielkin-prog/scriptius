@@ -3,6 +3,7 @@ import json
 import asyncio
 import audioop
 import collections
+import dataclasses
 import time
 import logging
 
@@ -35,6 +36,16 @@ FILLER_WORDS = frozenset({
     "так", "ага", "ок", "угу", "добре", "розумію", "ну", "да",
     "мгм", "гм", "ааа", "еее",
 })
+
+
+# ── Event callbacks ──────────────────────────────────────────────────────────
+
+@dataclasses.dataclass
+class EventCallbacks:
+    on_transcript: object = None   # (speaker, text, is_final) -> None
+    on_vad_event: object = None    # (speaker, event) -> None
+    on_call_start: object = None   # (session_id) -> None
+    on_call_end: object = None     # (session_id) -> None
 
 
 def _load_credentials():
@@ -122,7 +133,8 @@ MAX_RECONNECTS = 10
 # ── STT streaming (v2 chirp) ─────────────────────────────────────────────────
 
 async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
-                         websocket: WebSocket, credentials, session_id: str):
+                         websocket: WebSocket, credentials, session_id: str,
+                         callbacks: EventCallbacks = None):
     """Stream audio to Google Speech v2 with chirp model for uk-UA."""
     from google.cloud.speech_v2 import SpeechAsyncClient
     from google.cloud.speech_v2.types import cloud_speech
@@ -280,6 +292,8 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
                 except Exception:
                     call_ended = True
                     return
+                if callbacks and callbacks.on_transcript:
+                    callbacks.on_transcript(speaker, text, is_final)
                 if is_final:
                     last_sent_text = ""
 
@@ -323,7 +337,8 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
 # ── STT streaming (v1 latest_long fallback) ───────────────────────────────────
 
 async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
-                         websocket: WebSocket, credentials, session_id: str):
+                         websocket: WebSocket, credentials, session_id: str,
+                         callbacks: EventCallbacks = None):
     """Stream audio to Google Speech v1 with latest_long model for uk-UA."""
     from google.cloud import speech as speech_v1
 
@@ -461,6 +476,8 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
                 except Exception:
                     call_ended = True
                     return
+                if callbacks and callbacks.on_transcript:
+                    callbacks.on_transcript(speaker, text, is_final)
                 if is_final:
                     last_sent_text = ""
 
@@ -505,9 +522,38 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
 
 @router.websocket("/audio")
 async def audio_ws(websocket: WebSocket):
+    from app.session import CallSession
+    from app.ai_analysis import CallAnalyzer
+
     await websocket.accept()
     session_id = f"scriptius_{int(time.time())}_{id(websocket)}"
     logger.info(f"[{session_id}] WebSocket connected")
+
+    # ── Session & callbacks ──────────────────────────────────────────────
+    session = CallSession(session_id)
+    analyzer = CallAnalyzer(session, websocket)
+
+    def _on_transcript(speaker, text, is_final):
+        if is_final:
+            session.add_transcript(speaker, text)
+            analyzer.on_new_transcript(speaker, text)
+
+    def _on_vad_event(speaker, event):
+        pass  # VAD events already logged by SpeechDetector
+
+    def _on_call_start(sid):
+        logger.info(f"[{sid}] Call session started")
+
+    def _on_call_end(sid):
+        logger.info(f"[{sid}] Call session ended, {len(session.conversation)} utterances")
+
+    callbacks = EventCallbacks(
+        on_transcript=_on_transcript,
+        on_vad_event=_on_vad_event,
+        on_call_start=_on_call_start,
+        on_call_end=_on_call_end,
+    )
+    callbacks.on_call_start(session_id)
 
     try:
         credentials = _load_credentials()
@@ -526,10 +572,10 @@ async def audio_ws(websocket: WebSocket):
     logger.info(f"[{session_id}] Using STT engine: {STT_ENGINE}")
 
     client_task = asyncio.create_task(
-        stream_fn(client_queue, "client", websocket, credentials, session_id)
+        stream_fn(client_queue, "client", websocket, credentials, session_id, callbacks)
     )
     sales_task = asyncio.create_task(
-        stream_fn(sales_queue, "sales", websocket, credentials, session_id)
+        stream_fn(sales_queue, "sales", websocket, credentials, session_id, callbacks)
     )
 
     try:
@@ -563,6 +609,8 @@ async def audio_ws(websocket: WebSocket):
                             })
                         except Exception:
                             pass
+                        if callbacks.on_vad_event:
+                            callbacks.on_vad_event(detector.speaker, ev)
 
                 elif "text" in msg and msg["text"]:
                     try:
@@ -583,6 +631,11 @@ async def audio_ws(websocket: WebSocket):
         logger.info(f"[{session_id}] WebSocket disconnected")
 
     finally:
+        analyzer.cancel()
+
+        if callbacks.on_call_end:
+            callbacks.on_call_end(session_id)
+
         # Signal STT tasks to stop
         await client_queue.put(None)
         await sales_queue.put(None)
