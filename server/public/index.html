@@ -1,69 +1,295 @@
 <!DOCTYPE html>
 <html lang="uk">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scriptius — Live Call Transcript</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scriptius — AI Sales Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="header">
-      <h1>Scriptius</h1>
+
+<!-- ── Header ──────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo">Scriptius</span>
+    <nav class="nav">
+      <a href="#calls" class="nav-link active" data-page="calls">Calls</a>
+      <a href="#dashboard" class="nav-link" data-page="dashboard">Dashboard</a>
+      <a href="#history" class="nav-link" data-page="history">History</a>
+      <a href="#settings" class="nav-link" data-page="settings">Settings</a>
+    </nav>
+  </div>
+  <div class="header-right">
+    <div class="header-controls">
+      <button id="btnStart" class="btn btn-start">Start Call</button>
+      <button id="btnStop" class="btn btn-stop" disabled>Stop</button>
       <div class="status">
-        <div class="status-dot" id="statusDot"></div>
+        <div id="statusDot" class="status-dot"></div>
         <span id="statusText">Idle</span>
       </div>
-    </header>
-
-    <div class="controls">
-      <button id="btnStart" class="btn btn-start">&#9654; Start Capture</button>
-      <button id="btnStop" class="btn btn-stop" disabled>&#9632; Stop</button>
-    </div>
-
-    <div class="error-msg" id="errorMsg"></div>
-
-    <div class="levels">
-      <div class="level-group">
-        <div class="level-label">
-          <span>Client (system audio)</span>
-          <span class="level-value" id="systemValue">0.0000</span>
-        </div>
-        <div class="level-bar-bg">
-          <div class="level-bar system" id="systemBar"></div>
-        </div>
-      </div>
-      <div class="level-group">
-        <div class="level-label">
-          <span>Mic (sales)</span>
-          <span class="level-value" id="micValue">0.0000</span>
-        </div>
-        <div class="level-bar-bg">
-          <div class="level-bar mic" id="micBar"></div>
+      <div class="mic-level-inline">
+        <span class="mic-level-label">Mic</span>
+        <div class="level-track">
+          <div id="micBar" class="level-fill mic"></div>
         </div>
       </div>
     </div>
-
-    <div class="transcript-section">
-      <div class="transcript-header">
-        <div class="section-title">Транскрипт</div>
-        <span class="transcript-count" id="transcriptCount">0 реплік</span>
-      </div>
-      <div class="transcript-list" id="transcriptList">
-        <div class="transcript-empty" id="transcriptEmpty">Очікування на транскрипцію...</div>
-      </div>
-    </div>
-
     <div class="connections">
-      <div class="conn-status">
-        <span class="conn-dot" id="agentDot"></span> Desktop Agent
+      <span id="agentDot" class="conn-dot"></span>
+      <span class="conn-label">Agent</span>
+      <span id="backendDot" class="conn-dot"></span>
+      <span class="conn-label">STT</span>
+    </div>
+  </div>
+</header>
+
+<!-- ── Error ───────────────────────────────────────────────── -->
+<div class="error-msg" id="errorMsg"></div>
+
+<!-- ── Page: Calls ─────────────────────────────────────────── -->
+<div id="page-calls" class="page active">
+  <div class="calls-layout">
+
+    <!-- Left Sidebar: Profile + Notes -->
+    <aside class="sidebar-left">
+      <div class="card profile-card">
+        <div class="profile-header">
+          <div id="avatar" class="avatar">?</div>
+          <div class="profile-info">
+            <div id="clientName" class="client-name">New Client</div>
+            <div id="clientRole" class="client-role">&mdash;</div>
+          </div>
+        </div>
+
+        <div class="profile-field course-field">
+          <label class="field-label">Course</label>
+          <select id="courseSelect" class="course-select">
+            <option value="">Select course...</option>
+            <option value="Управління командою">Управління командою &mdash; $500</option>
+            <option value="Excel для бізнесу">Excel для бізнесу &mdash; $500</option>
+          </select>
+        </div>
+
+        <div class="profile-grid">
+          <div class="profile-field">
+            <span class="field-label">Position</span>
+            <span id="fieldPosition" class="field-value">&mdash;</span>
+          </div>
+          <div class="profile-field">
+            <span class="field-label">Experience</span>
+            <span id="statExperience" class="field-value">&mdash;</span>
+          </div>
+          <div class="profile-field">
+            <span class="field-label">Company</span>
+            <span id="statCompany" class="field-value">&mdash;</span>
+          </div>
+          <div class="profile-field">
+            <span class="field-label">Industry</span>
+            <span id="statIndustry" class="field-value">&mdash;</span>
+          </div>
+          <div class="profile-field full-width">
+            <span class="field-label">Pain Points</span>
+            <span id="fieldPainPoints" class="field-value">&mdash;</span>
+          </div>
+          <div class="profile-field full-width">
+            <span class="field-label">Goal</span>
+            <span id="fieldGoal" class="field-value">&mdash;</span>
+          </div>
+        </div>
       </div>
-      <div class="conn-status">
-        <span class="conn-dot" id="backendDot"></span> STT Backend
+
+      <div class="card notes-card">
+        <div class="card-header">
+          <h3>Notes</h3>
+        </div>
+        <div id="notesBody" class="notes-body" contenteditable="true" data-placeholder="Type your notes here..."></div>
+      </div>
+    </aside>
+
+    <!-- Center: Script Sections -->
+    <main class="content-center">
+      <!-- Qualification Section -->
+      <div id="sectionQualification" class="script-section active">
+        <div class="section-header">
+          <div class="section-dot active"></div>
+          <h3 class="section-title">Actualisation &amp; Qualification</h3>
+          <span class="section-badge ask-now">Ask Now</span>
+        </div>
+        <div class="questions-grid">
+          <div class="questions-group">
+            <div class="question-item" data-qid="q-available">
+              <input type="checkbox" class="question-check" />
+              <span class="question-text">Чи зручно вам зараз розмовляти?</span>
+              <span class="question-badge"></span>
+            </div>
+            <div class="question-item" data-qid="q-role">
+              <input type="checkbox" class="question-check" />
+              <span class="question-text">Яка ваша посада та в якій індустрії ви працюєте?</span>
+              <span class="question-badge"></span>
+            </div>
+          </div>
+          <div class="questions-group">
+            <div class="question-item" data-qid="q-experience">
+              <input type="checkbox" class="question-check" />
+              <span class="question-text">Скільки років ви уже працюєте у цій сфері?</span>
+              <span class="question-badge"></span>
+            </div>
+            <div class="question-item" data-qid="q-pain">
+              <input type="checkbox" class="question-check" />
+              <span class="question-text">З якими основними проблемами ви зараз стикаєтесь і яких цілей хочете досягти?</span>
+              <span class="question-badge"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Value Justification Section -->
+      <div id="sectionValue" class="script-section">
+        <div class="section-header">
+          <div class="section-dot"></div>
+          <h3 class="section-title">Value Justification</h3>
+          <span class="section-badge up-next">Up Next</span>
+        </div>
+        <div id="valueBody" class="value-body">
+          <span class="waiting-text">Waiting for AI to generate questions...</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Sidebar: Summary + Offer -->
+    <aside class="sidebar-right">
+      <div class="card summary-card">
+        <h3 class="card-title">Conversation Summary</h3>
+        <ul id="summaryList" class="summary-list">
+          <li class="waiting-text">Waiting for conversation...</li>
+        </ul>
+        <div id="sentimentRow" class="sentiment-row" style="display:none">
+          <span class="row-label">Sentiment</span>
+          <span id="sentimentBadge" class="sentiment-badge"></span>
+        </div>
+        <div id="objectionRow" class="objection-row" style="display:none">
+          <span class="row-label">Objection</span>
+          <span id="objectionText" class="objection-text"></span>
+        </div>
+      </div>
+
+      <div class="card offer-card">
+        <h3 class="card-title">Recommended Offer</h3>
+        <div id="offerText" class="offer-text waiting-text-light">Waiting for analysis...</div>
+        <div id="priceRow" class="price-row" style="display:none">
+          <span id="priceCurrent" class="price-value"></span>
+        </div>
+        <div class="readiness-bar">
+          <div class="readiness-header">
+            <span class="readiness-label">Client Readiness</span>
+            <span id="readinessValue" class="readiness-value">&mdash;</span>
+          </div>
+          <div class="readiness-segments">
+            <div class="readiness-segment"></div>
+            <div class="readiness-segment"></div>
+            <div class="readiness-segment"></div>
+            <div class="readiness-segment"></div>
+            <div class="readiness-segment"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<!-- ── Page: Call Summary ──────────────────────────────────── -->
+<div id="page-call-summary" class="page">
+  <div class="summary-layout">
+    <div class="summary-main">
+      <div class="card summary-header-card">
+        <div class="summary-header-row">
+          <h2>Call Summary</h2>
+          <span class="badge badge-completed">Completed</span>
+        </div>
+        <div id="summaryMeta" class="summary-meta"></div>
+      </div>
+
+      <div class="card scores-card">
+        <h3 class="card-title">Section Scores</h3>
+        <div class="score-row">
+          <span class="score-icon done">&#10003;</span>
+          <span class="score-label">Qualification</span>
+          <span id="scoreQualDetail" class="score-detail"></span>
+        </div>
+        <div class="score-row">
+          <span class="score-icon done">&#10003;</span>
+          <span class="score-label">Value Justification</span>
+          <span id="scoreValueDetail" class="score-detail"></span>
+        </div>
+        <div class="score-total">
+          <span class="score-label">Total</span>
+          <span id="totalQuestions" class="score-detail"></span>
+        </div>
+      </div>
+
+      <div class="card feedback-card">
+        <h3 class="card-title">Feedback</h3>
+        <div class="feedback-section">
+          <span class="feedback-label good">What went well</span>
+          <p class="feedback-placeholder">Call feedback will appear here in a future update.</p>
+        </div>
+        <div class="feedback-section">
+          <span class="feedback-label improve">Areas to improve</span>
+          <p class="feedback-placeholder">Improvement suggestions will appear here in a future update.</p>
+        </div>
+      </div>
+    </div>
+    <div class="summary-sidebar">
+      <div class="card">
+        <h3 class="card-title">Notes</h3>
+        <div id="summaryNotesBody" class="notes-body readonly"></div>
       </div>
     </div>
   </div>
+</div>
 
-  <script src="app.js"></script>
+<!-- ── Page: Dashboard ─────────────────────────────────────── -->
+<div id="page-dashboard" class="page">
+  <div class="coming-soon"><h1>Dashboard</h1><p>Coming Soon</p></div>
+</div>
+
+<!-- ── Page: History ───────────────────────────────────────── -->
+<div id="page-history" class="page">
+  <div class="coming-soon"><h1>History</h1><p>Coming Soon</p></div>
+</div>
+
+<!-- ── Page: Settings ──────────────────────────────────────── -->
+<div id="page-settings" class="page">
+  <div class="coming-soon"><h1>Settings</h1><p>Coming Soon</p></div>
+</div>
+
+<!-- ── Transcript Slide-out Panel ──────────────────────────── -->
+<div id="transcriptPanel" class="transcript-panel" aria-hidden="true">
+  <div class="transcript-panel-header">
+    <h3>Live Transcript</h3>
+    <span id="transcriptCount" class="transcript-count">0 replies</span>
+    <button id="transcriptClose" class="transcript-close">&times;</button>
+  </div>
+  <div id="transcriptList" class="transcript-list">
+    <div id="transcriptEmpty" class="transcript-empty">Waiting for transcription...</div>
+  </div>
+</div>
+<button id="transcriptToggle" class="transcript-toggle">
+  <span class="toggle-arrow">&#9664;</span>
+  <span>Transcript</span>
+</button>
+
+<!-- Hidden: system audio level (used internally, not displayed in new UI) -->
+<div style="display:none">
+  <div id="systemBar"></div>
+  <div id="systemValue">0</div>
+  <div id="micValue">0</div>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>

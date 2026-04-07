@@ -623,6 +623,23 @@ async def audio_ws(websocket: WebSocket):
                     elif msg_type == "end_call":
                         logger.info(f"[{session_id}] Call ended by client")
                         break
+                    elif msg_type == "clientInfo":
+                        client_data = data.get("data", {})
+                        logger.info(f"[{session_id}] Client info received: {list(client_data.keys())}")
+                        session.update_profile(client_data)
+                        try:
+                            await websocket.send_json({
+                                "type": "analysis",
+                                "data": {"clientProfile": session.client_profile},
+                            })
+                        except Exception:
+                            pass
+                        analyzer.trigger_fast()
+                    elif msg_type == "note":
+                        note_text = data.get("text", "")
+                        if note_text:
+                            session.notes.append(note_text)
+                            logger.info(f"[{session_id}] Note saved: \"{note_text[:100]}\"")
 
             elif msg["type"] == "websocket.disconnect":
                 break

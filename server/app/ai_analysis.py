@@ -7,7 +7,7 @@ import logging
 from google import genai
 from fastapi import WebSocket
 
-from app.session import CallSession
+from app.session import CallSession, PROFILE_FIELDS
 
 logger = logging.getLogger("scriptius.ai")
 
@@ -178,6 +178,12 @@ class CallAnalyzer:
             self._full_task.cancel()
         self._full_task = asyncio.create_task(self._debounced_full())
 
+    def trigger_fast(self) -> None:
+        """Trigger fast analysis (e.g. after clientInfo update)."""
+        if self._fast_task and not self._fast_task.done():
+            self._fast_task.cancel()
+        self._fast_task = asyncio.create_task(self._debounced_fast())
+
     def cancel(self) -> None:
         for task in (self._fast_task, self._full_task):
             if task and not task.done():
@@ -250,6 +256,27 @@ class CallAnalyzer:
                 logger.warning(f"[{sid}][AI] Fast analysis: failed to parse JSON")
                 return
 
+            # Normalize qualificationStatus → list of {id, status}
+            qs = analysis.get("qualificationStatus")
+            if isinstance(qs, list):
+                analysis["qualificationStatus"] = [
+                    {"id": item.get("id", ""), "status": item.get("status")}
+                    for item in qs if isinstance(item, dict)
+                ]
+
+            # Normalize clientProfile → ensure all PROFILE_FIELDS present
+            cp = analysis.get("clientProfile")
+            if isinstance(cp, dict):
+                analysis["clientProfile"] = {f: cp.get(f) for f in PROFILE_FIELDS}
+
+            # Normalize valueStatus → list of {id, status}
+            vs = analysis.get("valueStatus")
+            if isinstance(vs, list):
+                analysis["valueStatus"] = [
+                    {"id": item.get("id", ""), "status": item.get("status")}
+                    for item in vs if isinstance(item, dict)
+                ]
+
             logger.info(
                 f"[{sid}][AI] Fast result: "
                 f"qualificationStatus={json.dumps(analysis.get('qualificationStatus', []), ensure_ascii=False)[:200]}, "
@@ -321,6 +348,23 @@ class CallAnalyzer:
 
             analysis = _parse_json(response.text)
             if analysis:
+                # Normalize summary → always a list of strings
+                summary = analysis.get("summary")
+                if isinstance(summary, str):
+                    analysis["summary"] = [
+                        s.strip().lstrip("•-– ")
+                        for s in summary.split("\n") if s.strip()
+                    ]
+                elif not isinstance(summary, list):
+                    analysis["summary"] = []
+
+                # Normalize sentiment → always a string
+                sentiment = analysis.get("sentiment")
+                if isinstance(sentiment, dict):
+                    label = sentiment.get("label", "Neutral")
+                    reason = sentiment.get("reason", "")
+                    analysis["sentiment"] = f"{label} — {reason}" if reason else label
+
                 logger.info(
                     f"[{sid}][AI] Full result: "
                     f"sentiment={analysis.get('sentiment', 'N/A')}, "
