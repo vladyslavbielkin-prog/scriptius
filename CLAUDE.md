@@ -24,6 +24,7 @@ Microphone → Webapp (getUserMedia) ──────────────�
 | Desktop Agent | Swift 5.9, CoreAudio, AudioToolbox, Network.framework, macOS 14.2+ |
 | Server | Python 3.12, FastAPI, uvicorn, google-cloud-speech ≥2.38.0 |
 | Webapp | Vanilla JS, Web Audio API, AudioWorklet, WebSocket, Browser SpeechRecognition |
+| AI Analysis | Google Gemini (gemini-2.5-flash, gemini-2.5-flash-lite), google-genai SDK |
 | Deploy | Docker, Fly.io (region: ams, app: `scriptius`) |
 | Audio format | 16kHz mono 16-bit PCM (LINEAR16) throughout |
 
@@ -40,6 +41,9 @@ Microphone → Webapp (getUserMedia) ──────────────�
 ├── server/
 │   ├── main.py                    # FastAPI app, includes audio_ws router, mounts public/ as static
 │   ├── audio_ws.py                # WebSocket /audio endpoint, SpeechDetector (VAD), STT streaming (v2/v1)
+│   ├── app/
+│   │   ├── ai_analysis.py        # CallAnalyzer: Gemini-powered qualification, profiling, value questions
+│   │   └── session.py            # CallSession: conversation state, client profile, deduplication
 │   ├── requirements.txt           # fastapi, uvicorn[standard], google-cloud-speech, python-dotenv
 │   ├── Dockerfile                 # python:3.12-slim, uvicorn on port 8000
 │   ├── fly.toml                   # Fly.io config: ams region, shared-cpu-1x, 1GB RAM
@@ -113,6 +117,8 @@ Additionally, Webapp runs **Browser SpeechRecognition** on the mic stream for re
 | Webapp → Server | JSON | `{type: "end_call"}` — graceful shutdown |
 | Server → Webapp | JSON | `{type: "transcript", speaker: "client\|sales", text: "...", interim: bool}` |
 | Server → Webapp | JSON | `{type: "vad_event", speaker: "client\|sales", event: "speech_start\|speech_end"}` |
+| Server → Webapp | JSON | `{type: "analysis", data: {qualificationStatus, clientProfile, summary, sentiment, ...}}` |
+| Server → Webapp | JSON | `{type: "valueQuestions", questions: [{id, text, batch}], batch: N}` |
 
 ## STT Configuration
 
@@ -137,6 +143,40 @@ Additionally, Webapp runs **Browser SpeechRecognition** on the mic stream for re
 - **Speech entry**: 3+ consecutive frames above threshold (60ms)
 - **Speech exit**: 15+ consecutive frames below threshold (300ms debounce)
 - **Behavior**: emits `speech_start` / `speech_end` events only — does **NOT** gate audio to STT (all frames always sent)
+
+## AI Analysis
+
+**Location**: `server/app/ai_analysis.py` (class `CallAnalyzer`), `server/app/session.py` (class `CallSession`)
+
+### Models
+
+| Model | Role | Temperature |
+|-------|------|-------------|
+| `gemini-2.5-flash-lite` | Fast analysis (qualification + profile extraction) | 0.1 |
+| `gemini-2.5-flash` | Full analysis (summary, sentiment, offer) + value question generation | 0.3 / 0.4 |
+
+### Fast analysis (debounce 0.25s)
+
+Triggered on every new transcript. Extracts:
+- **Qualification tracking** — 4 predefined questions (availability, role/industry, experience, pain/goals); status: `asked` / `answered` / `null`
+- **Client profile** — 8 fields: name, role, company, industry, experience, painPoints, goal, course
+- **Value question status** — tracks which generated value questions have been asked/answered
+
+### Full analysis (debounce 1.5s)
+
+Triggered on every new transcript. Generates:
+- **Summary for offer** — up to 5 bullet points of client statements useful for closing
+- **Client sentiment** — Positive / Neutral / Skeptical / Negative + reason
+- **Objection handling** — rebuttal if client raised an objection
+- **Recommended offer** — best-fit course with price
+
+### Value question generation
+
+Personalized sales questions generated in two batches:
+- **Batch 1** (5 questions) — triggered when ≥2 profile tag fields (industry, experience, company, painPoints, goal) are filled
+- **Batch 2** (5 deeper follow-ups) — triggered when ≥2 questions from batch 1 have been asked
+
+Questions are tailored to client's industry, role, and pain points. Style: short (<15 words), no jargon, expert-level thinking.
 
 ## Desktop Agent
 
@@ -186,6 +226,7 @@ Stored in `server/.env` (see `server/.env.example`):
 | `GOOGLE_CREDENTIALS_JSON` | Full service account JSON (embedded, not a file path) |
 | `GOOGLE_STT_LOCATION` | GCP region for Speech v2 API (`europe-west4`) |
 | `STT_ENGINE` | `chirp_v2` (primary) or `latest_long_v1` (v1 fallback) |
+| `GEMINI_API_KEY` | Google Gemini API key for AI analysis |
 
 ## Code Style
 
@@ -198,7 +239,6 @@ Stored in `server/.env` (see `server/.env.example`):
 
 These features are planned but **do not exist in the codebase** — do not look for them:
 
-- AI analysis (Gemini integration for call scoring/summarization)
 - HubSpot CRM integration (contact matching, call logging)
 - Full product UI (current UI is functional but minimal/dev-oriented)
 - User authentication and authorization
