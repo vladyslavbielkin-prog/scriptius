@@ -79,7 +79,7 @@ h1, h2, h3 {
 
 .nav-link {
   text-decoration: none;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Space Grotesk', sans-serif;
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
