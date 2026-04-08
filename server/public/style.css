@@ -266,6 +266,16 @@ body.transcript-open .calls-layout {
   margin-bottom: 12px;
 }
 
+.summary-card .card-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.summary-card, .offer-card {
+  padding: 24px;
+}
+
 /* ── Left Sidebar ──────────────────────────────────────────── */
 .sidebar-left {
   width: 268px;
@@ -690,7 +700,7 @@ body.transcript-open .calls-layout {
   color: rgba(255, 255, 255, 0.6);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
 }
 
 .offer-text {
@@ -759,7 +769,7 @@ body.transcript-open .calls-layout {
 
 .readiness-segments {
   display: flex;
-  gap: 2px;
+  gap: 4px;
 }
 
 .readiness-segment {
@@ -772,29 +782,17 @@ body.transcript-open .calls-layout {
 
 .readiness-segment.filled { background: var(--green-light); }
 
-/* ── Waiting / Shimmer ─────────────────────────────────────── */
+/* ── Waiting text ───────────────────────────────────────────── */
 .waiting-text {
   color: var(--text-muted);
-  font-size: 12px;
-  font-style: italic;
-  background: linear-gradient(90deg, var(--text-muted), #c0bdb6, var(--text-muted));
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: shimmer 2s infinite linear;
+  font-size: 14px;
+  font-style: normal;
 }
 
 .waiting-text-light {
   color: rgba(255, 255, 255, 0.4);
-  font-size: 12px;
-  font-style: italic;
-  background: linear-gradient(90deg, rgba(255,255,255,0.3), rgba(255,255,255,0.6), rgba(255,255,255,0.3));
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: shimmer 2s infinite linear;
+  font-size: 13px;
+  font-style: normal;
 }
 
 @keyframes shimmer {
