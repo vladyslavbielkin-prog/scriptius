@@ -1025,6 +1025,8 @@ function initCourseSelector() {
     const priceRow = document.getElementById('priceRow');
     const priceEl = document.getElementById('priceCurrent');
 
+    e.target.classList.toggle('has-value', !!course);
+
     if (course) {
       priceRow.style.display = 'block';
       priceEl.textContent = '$500';
