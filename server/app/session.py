@@ -24,8 +24,29 @@ class CallSession:
 
     def add_transcript(self, speaker: str, text: str) -> None:
         mapped = SPEAKER_MAP.get(speaker, speaker)
-        entry = {"speaker": mapped, "text": text, "timestamp": time.time()}
-        self.conversation.append(entry)
+        text_lower = text.lower().strip()
+
+        # Check recent entries from same speaker for substring overlap
+        for entry in reversed(self.conversation[-10:]):
+            if entry["speaker"] != mapped:
+                continue
+            existing_lower = entry["text"].lower().strip()
+
+            if text_lower == existing_lower:
+                return  # exact duplicate — skip
+            if text_lower in existing_lower:
+                return  # new text is subset of existing — skip
+            if existing_lower in text_lower:
+                # existing is subset of new — replace with longer version
+                entry["text"] = text
+                entry["timestamp"] = time.time()
+                logger.info(f"[{self.session_id}] Replaced transcript: [{mapped}]: \"{text[:120]}\"")
+                return
+            break  # only check most recent entry from this speaker
+
+        # No overlap — append as new
+        new_entry = {"speaker": mapped, "text": text, "timestamp": time.time()}
+        self.conversation.append(new_entry)
         logger.info(f"[{self.session_id}] Added transcript: [{mapped}]: \"{text[:120]}\"")
 
     def get_transcript_text(self) -> str:

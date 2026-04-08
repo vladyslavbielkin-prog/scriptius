@@ -23,9 +23,6 @@ const backendDot = document.getElementById('backendDot');
 const AGENT_WS_URL = 'ws://localhost:9001';
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const BACKEND_WS_URL = `${wsProtocol}//${location.host}/audio`;
-const SILENCE_TIMEOUT = 1000;
-const MAX_UTTERANCE_CHARS = 120;
-const STT_LANG = 'uk-UA';
 
 // ── State ───────────────────────────────────────────────────
 let capturing = false;
@@ -38,13 +35,6 @@ let pcmWorkletNode = null;
 let levelInterval = null;
 let callStartTime = null;
 
-// STT state
-let recognition = null;
-let sttActive = false;
-let silenceTimer = null;
-let lastInterimText = '';
-let utteranceId = 0;
-
 // Transcript UI state
 let replyCount = 0;
 let utteranceEntries = {};
@@ -53,9 +43,8 @@ const SPEAKER_LABELS = { client: 'Client', sales: 'Sales Rep' };
 // Backend transcript uid tracking
 let backendUtteranceCounters = { client: 0, sales: 0 };
 let backendActiveUids = {};
-
-// DOM ref of BSR-finalized sales card, kept for Chirp v2 to update text
-let salesChirpPendingEntry = null;
+let finalizeTimers = {};
+const FINALIZE_DELAY = 500;
 
 // VAD state: true = speaker is currently talking
 let vadState = { client: false, sales: false };
@@ -161,41 +150,17 @@ function connectBackend() {
       if (msg.event === 'speech_end') vadState[speaker] = false;
 
       if (msg.event === 'speech_start' && !backendActiveUids[speaker]) {
-        if (speaker === 'sales') salesChirpPendingEntry = null;
         backendActiveUids[speaker] = 'be_' + speaker + '_' + (backendUtteranceCounters[speaker] || 0);
         handleTranscript(speaker, '...', true, backendActiveUids[speaker]);
 
-        // Barge-in: force-finalize other speaker's card
+        // Barge-in: force-finalize other speaker's active card
         const otherSpeaker = speaker === 'client' ? 'sales' : 'client';
-        const otherUid = backendActiveUids[otherSpeaker];
-        if (otherUid) {
-          const otherEntry = utteranceEntries[String(otherUid)];
-          if (otherEntry) {
-            const currentText = otherEntry.querySelector('.transcript-text').textContent.trim();
-            if (currentText === '...' || currentText === '') {
-              otherEntry.classList.remove('interim');
-              otherEntry.classList.add('processing');
-            } else {
-              otherEntry.classList.remove('interim', 'processing');
-              delete utteranceEntries[String(otherUid)];
-              backendActiveUids[otherSpeaker] = null;
-            }
-          } else {
-            backendActiveUids[otherSpeaker] = null;
+        if (backendActiveUids[otherSpeaker]) {
+          if (finalizeTimers[otherSpeaker]) {
+            clearTimeout(finalizeTimers[otherSpeaker]);
+            finalizeTimers[otherSpeaker] = null;
           }
-        }
-
-        // Barge-in: force-finalize active Browser SR interim for sales
-        if (speaker === 'client' && lastInterimText) {
-          const su = backendActiveUids['sales'];
-          const sh = su !== undefined && su !== null;
-          const au = sh ? su : utteranceId;
-          bsrSoftFinalize(lastInterimText, au, sh);
-          if (!sh) utteranceId++;
-          lastInterimText = '';
-          clearTimeout(silenceTimer);
-          silenceTimer = null;
-          if (recognition && sttActive) recognition.abort();
+          finalizeActiveCard(otherSpeaker);
         }
       }
 
@@ -206,6 +171,7 @@ function connectBackend() {
           entry.classList.remove('interim');
           entry.classList.add('processing');
         }
+        scheduleFinalize(speaker);
       }
     }
 
@@ -223,20 +189,18 @@ function connectBackend() {
         window._chirpEstimatedStart[String(uid)] = Date.now() - estimatedDuration;
       }
 
+      // Update card text — keep mutable (don't reset uid)
+      handleTranscript(speaker, msg.text, true, uid);
+
+      // Chirp FINAL → set finalizing state + schedule delayed finalization
       if (!msg.interim) {
-        backendUtteranceCounters[speaker] = (backendUtteranceCounters[speaker] || 0) + 1;
-        backendActiveUids[speaker] = null;
-
-        if (speaker === 'sales') removeDuplicateBsrCards(msg.text);
-
-        if (speaker === 'sales' && salesChirpPendingEntry) {
-          salesChirpPendingEntry.querySelector('.transcript-text').textContent = msg.text;
-          salesChirpPendingEntry = null;
-          transcriptList.scrollTop = transcriptList.scrollHeight;
-          return;
+        const entry = utteranceEntries[String(uid)];
+        if (entry) {
+          entry.classList.remove('interim', 'processing');
+          entry.classList.add('finalizing');
         }
+        scheduleFinalize(speaker);
       }
-      handleTranscript(speaker, msg.text, msg.interim, uid);
     }
 
     // ── AI Analysis ──
@@ -319,129 +283,36 @@ function stopMicCapture() {
   if (audioContext) { audioContext.close(); audioContext = null; }
 }
 
-// ── SpeechRecognition (browser-native STT for mic) ──────────
+// ── Finalize Helpers ─────────────────────────────────────────
 
-function startSpeechRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { console.warn('[STT] SpeechRecognition not available'); return; }
-
-  sttActive = true;
-  utteranceId = 0;
-  lastInterimText = '';
-
-  recognition = new SR();
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = STT_LANG;
-
-  recognition.onresult = (event) => {
-    if (!vadState.sales) return;
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      const text = result[0].transcript.trim();
-      if (!text) continue;
-
-      const speaker = 'sales';
-      const sharedUid = backendActiveUids[speaker];
-      const isShared = sharedUid !== undefined && sharedUid !== null;
-      const activeUid = isShared ? sharedUid : utteranceId;
-
-      if (result.isFinal) {
-        clearTimeout(silenceTimer);
-        silenceTimer = null;
-        lastInterimText = '';
-        console.log('[STT-Sales] FINAL', `uid=${activeUid}`, `text="${text}"`);
-        bsrSoftFinalize(text, activeUid, isShared);
-        if (!isShared) utteranceId++;
-        if (recognition && sttActive) { recognition.abort(); return; }
-      } else {
-        lastInterimText = text;
-
-        if (text.length > MAX_UTTERANCE_CHARS) {
-          clearTimeout(silenceTimer);
-          silenceTimer = null;
-          console.log('[STT-Sales] FINAL (max chars)', `uid=${activeUid}`, `text="${text}"`);
-          bsrSoftFinalize(text, activeUid, isShared);
-          lastInterimText = '';
-          if (!isShared) utteranceId++;
-          if (recognition && sttActive) recognition.abort();
-          return;
-        }
-
-        handleTranscript(speaker, text, true, activeUid);
-
-        clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(() => {
-          if (lastInterimText) {
-            const su = backendActiveUids[speaker];
-            const sh = su !== undefined && su !== null;
-            const au = sh ? su : activeUid;
-            console.log('[STT-Sales] FINAL (silence)', `uid=${au}`, `text="${lastInterimText}"`);
-            bsrSoftFinalize(lastInterimText, au, sh);
-            lastInterimText = '';
-            if (!isShared) utteranceId++;
-            if (recognition && sttActive) recognition.abort();
-          }
-        }, SILENCE_TIMEOUT);
-      }
-    }
-  };
-
-  recognition.onerror = (e) => {
-    if (e.error !== 'no-speech') console.error('[STT] Error:', e.error);
-  };
-
-  recognition.onend = () => {
-    if (sttActive) recognition.start();
-  };
-
-  recognition.start();
-  console.log('[STT] SpeechRecognition started');
+function scheduleFinalize(speaker) {
+  if (finalizeTimers[speaker]) clearTimeout(finalizeTimers[speaker]);
+  finalizeTimers[speaker] = setTimeout(() => {
+    finalizeTimers[speaker] = null;
+    finalizeActiveCard(speaker);
+  }, FINALIZE_DELAY);
 }
 
-function stopSpeechRecognition() {
-  sttActive = false;
-  clearTimeout(silenceTimer);
-  silenceTimer = null;
-  lastInterimText = '';
-  if (recognition) {
-    recognition.onend = null;
-    recognition.stop();
-    recognition = null;
-  }
-}
+function finalizeActiveCard(speaker) {
+  const uid = backendActiveUids[speaker];
+  if (!uid) return;
 
-// ── Transcript Helpers ──────────────────────────────────────
-
-function bsrSoftFinalize(text, activeUid, isShared) {
-  const key = String(activeUid);
-  const entry = utteranceEntries[key];
+  const entry = utteranceEntries[String(uid)];
   if (entry) {
-    entry.querySelector('.transcript-text').textContent = text;
-    entry.classList.remove('interim', 'processing');
-    delete utteranceEntries[key];
-    if (isShared) salesChirpPendingEntry = entry;
-    replyCount++;
-    transcriptCount.textContent = `${replyCount} replies`;
-    transcriptList.scrollTop = transcriptList.scrollHeight;
-  }
-}
-
-function removeDuplicateBsrCards(chirpText) {
-  const cards = transcriptList.querySelectorAll('.transcript-entry.sales');
-  const chirpLower = chirpText.toLowerCase();
-  const last5 = Array.from(cards).slice(-5);
-  for (const card of last5) {
-    const cardText = card.querySelector('.transcript-text').textContent.trim();
-    if (!cardText || cardText === '...') continue;
-    const cardLower = cardText.toLowerCase();
-    if (chirpLower.includes(cardLower) && card !== salesChirpPendingEntry) {
-      card.remove();
-      for (const [key, entry] of Object.entries(utteranceEntries)) {
-        if (entry === card) { delete utteranceEntries[key]; break; }
-      }
+    const text = entry.querySelector('.transcript-text').textContent.trim();
+    if (text && text !== '...') {
+      removeDuplicateCards(speaker, text);
+      entry.classList.remove('interim', 'processing', 'finalizing');
+      delete utteranceEntries[String(uid)];
+      replyCount++;
+      transcriptCount.textContent = `${replyCount} replies`;
+    } else {
+      entry.remove();
+      delete utteranceEntries[String(uid)];
     }
   }
+  backendUtteranceCounters[speaker] = (backendUtteranceCounters[speaker] || 0) + 1;
+  backendActiveUids[speaker] = null;
 }
 
 // ── Transcript UI ───────────────────────────────────────────
@@ -479,6 +350,34 @@ function createTranscriptEntry(speaker, text, isInterim) {
   return entry;
 }
 
+function findOverlappingCard(speaker, newText) {
+  const newLower = newText.toLowerCase();
+  const cards = transcriptList.querySelectorAll(`.transcript-entry.${speaker}:not(.interim):not(.processing):not(.finalizing)`);
+  const recent = Array.from(cards).slice(-5);
+  for (const card of recent) {
+    const cardText = card.querySelector('.transcript-text').textContent.trim().toLowerCase();
+    if (!cardText || cardText === '...') continue;
+    if (cardText === newLower) return { action: 'skip' };
+    if (newLower.includes(cardText)) return { action: 'replace', card };
+    if (cardText.includes(newLower)) return { action: 'skip' };
+  }
+  return { action: 'create' };
+}
+
+function removeDuplicateCards(speaker, text) {
+  const textLower = text.toLowerCase();
+  const cards = transcriptList.querySelectorAll(`.transcript-entry.${speaker}:not(.interim):not(.processing):not(.finalizing)`);
+  const recent = Array.from(cards).slice(-5);
+  for (const card of recent) {
+    const cardText = card.querySelector('.transcript-text').textContent.trim().toLowerCase();
+    if (!cardText || cardText === '...') continue;
+    if (textLower.includes(cardText)) {
+      card.remove();
+      replyCount--;
+    }
+  }
+}
+
 function handleTranscript(speaker, text, interim, uid) {
   if (transcriptEmpty) transcriptEmpty.style.display = 'none';
 
@@ -487,7 +386,13 @@ function handleTranscript(speaker, text, interim, uid) {
   }
 
   const key = String(uid);
-  const existing = utteranceEntries[key];
+  let existing = utteranceEntries[key];
+
+  // Immutability guard: if entry lost all mutable classes, it's finalized — don't mutate
+  if (existing && !existing.classList.contains('interim') && !existing.classList.contains('processing') && !existing.classList.contains('finalizing')) {
+    delete utteranceEntries[key];
+    existing = undefined;
+  }
 
   if (existing) {
     existing.querySelector('.transcript-text').textContent = text;
@@ -497,6 +402,16 @@ function handleTranscript(speaker, text, interim, uid) {
       replyCount++;
     }
   } else {
+    // Dedup: check if new text overlaps with recent finalized cards
+    if (text && text !== '...') {
+      const overlap = findOverlappingCard(speaker, text);
+      if (overlap.action === 'skip') return;
+      if (overlap.action === 'replace') {
+        overlap.card.remove();
+        replyCount--;
+      }
+    }
+
     const entry = createTranscriptEntry(speaker, text, interim);
     const estimatedStart = window._chirpEstimatedStart?.[key];
     entry.dataset.speechStartTime = String(estimatedStart || Date.now());
@@ -530,6 +445,7 @@ function handleTranscript(speaker, text, interim, uid) {
 }
 
 function clearTranscript() {
+  Object.keys(finalizeTimers).forEach(k => { clearTimeout(finalizeTimers[k]); finalizeTimers[k] = null; });
   transcriptList.innerHTML = '';
   if (transcriptEmpty) {
     transcriptList.appendChild(transcriptEmpty);
@@ -537,7 +453,6 @@ function clearTranscript() {
   }
   replyCount = 0;
   utteranceEntries = {};
-  salesChirpPendingEntry = null;
   transcriptCount.textContent = '0 replies';
 }
 
@@ -946,9 +861,6 @@ async function startCapture() {
   // 3. Start mic capture
   await startMicCapture();
 
-  // 4. Start Browser SR for sales interim
-  startSpeechRecognition();
-
   await waitForAgent;
 
   // Warnings
@@ -969,7 +881,7 @@ async function startCapture() {
 function stopCapture() {
   capturing = false;
 
-  stopSpeechRecognition();
+  Object.keys(finalizeTimers).forEach(k => { clearTimeout(finalizeTimers[k]); finalizeTimers[k] = null; });
   stopMicCapture();
 
   // Send notes before closing
