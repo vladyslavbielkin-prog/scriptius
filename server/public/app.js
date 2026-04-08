@@ -1001,6 +1001,8 @@ function setCapturingUI() {
   btnStop.disabled = false;
   statusDot.className = 'status-dot active';
   statusText.textContent = 'Live';
+  document.getElementById('centerEmpty').classList.add('hidden');
+  document.getElementById('sectionWrap').classList.remove('hidden');
 }
 
 function setIdleUI() {
@@ -1009,6 +1011,8 @@ function setIdleUI() {
   statusDot.className = 'status-dot';
   statusText.textContent = 'Idle';
   micBar.style.width = '0%';
+  document.getElementById('centerEmpty').classList.remove('hidden');
+  document.getElementById('sectionWrap').classList.add('hidden');
 }
 
 // ── Course Selector ─────────────────────────────────────────

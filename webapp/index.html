@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 
@@ -111,6 +111,15 @@
 
     <!-- Center: Script Sections -->
     <main class="content-center">
+
+      <!-- Pre-call empty state -->
+      <div id="centerEmpty" class="center-empty">
+        <span class="center-empty-icon">✦</span>
+        <p class="center-empty-heading">Choose the course and let the magic happen</p>
+        <p class="center-empty-sub">Questions will appear here once the conversation begins.</p>
+      </div>
+
+      <div id="sectionWrap" class="hidden">
       <!-- Qualification Section -->
       <div id="sectionQualification" class="script-section active">
         <div class="section-header">
@@ -157,6 +166,7 @@
           <span class="waiting-text">Waiting for AI to generate questions...</span>
         </div>
       </div>
+      </div><!-- /sectionWrap -->
     </main>
 
     <!-- Right Sidebar: Summary + Offer -->
@@ -248,23 +258,44 @@
         <h3 class="card-title">Notes</h3>
         <div id="summaryNotesBody" class="notes-body readonly"></div>
       </div>
+      <div class="card">
+        <h3 class="card-title">To-do After Call</h3>
+        <ul id="todoList" class="todo-list">
+          <li class="waiting-text">Will appear after call analysis...</li>
+        </ul>
+      </div>
     </div>
   </div>
 </div>
 
 <!-- ── Page: Dashboard ─────────────────────────────────────── -->
 <div id="page-dashboard" class="page">
-  <div class="coming-soon"><h1>Dashboard</h1><p>Coming Soon</p></div>
+  <div class="coming-soon">
+    <h1>Dashboard</h1>
+    <div class="coming-soon-divider"></div>
+    <p class="coming-soon-label">Coming Soon</p>
+    <p class="coming-soon-desc">We're building analytics and insights to help you track your sales performance.</p>
+  </div>
 </div>
 
 <!-- ── Page: History ───────────────────────────────────────── -->
 <div id="page-history" class="page">
-  <div class="coming-soon"><h1>History</h1><p>Coming Soon</p></div>
+  <div class="coming-soon">
+    <h1>History</h1>
+    <div class="coming-soon-divider"></div>
+    <p class="coming-soon-label">Coming Soon</p>
+    <p class="coming-soon-desc">Browse and review all your past calls, transcripts, and scores.</p>
+  </div>
 </div>
 
 <!-- ── Page: Settings ──────────────────────────────────────── -->
 <div id="page-settings" class="page">
-  <div class="coming-soon"><h1>Settings</h1><p>Coming Soon</p></div>
+  <div class="coming-soon">
+    <h1>Settings</h1>
+    <div class="coming-soon-divider"></div>
+    <p class="coming-soon-label">Coming Soon</p>
+    <p class="coming-soon-desc">Configure your scripts, integrations, and team preferences.</p>
+  </div>
 </div>
 
 <!-- ── Transcript Slide-out Panel ──────────────────────────── -->
@@ -290,6 +321,6 @@
   <div id="micValue">0</div>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>
