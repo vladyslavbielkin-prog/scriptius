@@ -79,6 +79,7 @@ h1, h2, h3 {
 
 .nav-link {
   text-decoration: none;
+  font-family: 'Inter', sans-serif;
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
@@ -122,10 +123,10 @@ h1, h2, h3 {
 .btn-start:hover:not(:disabled) { background: #5c6e50; }
 
 .btn-stop {
-  background: #F1AFA9;
+  background: #E8837C;
   color: #fff;
 }
-.btn-stop:hover:not(:disabled) { background: #e49e98; }
+.btn-stop:hover:not(:disabled) { background: #d4625b; }
 
 /* ── Status ────────────────────────────────────────────────── */
 .status {
