@@ -8,12 +8,12 @@ let package = Package(
         .executableTarget(
             name: "ScriptiusAudio",
             path: "Sources/ScriptiusAudio",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ],
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox")
-            ],
-            swiftSettings: [
-                .swiftLanguageMode(.v5)
             ]
         )
     ]
