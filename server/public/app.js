@@ -656,7 +656,9 @@ function updateClientProfile(profile) {
   if (profile.name) {
     document.getElementById('clientName').textContent = profile.name;
     const parts = profile.name.trim().split(/\s+/);
-    document.getElementById('avatar').textContent = parts.map(p => p[0]).join('').toUpperCase().slice(0, 2);
+    const avatarEl = document.getElementById('avatar');
+    avatarEl.textContent = parts.map(p => p[0]).join('').toUpperCase().slice(0, 2);
+    avatarEl.style.background = '#6B7D5E';
   }
 
   if (profile.role || profile.company) {

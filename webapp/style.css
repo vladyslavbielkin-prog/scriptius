@@ -47,8 +47,9 @@ h1, h2, h3 {
 /* ── Header ────────────────────────────────────────────────── */
 .header {
   height: 48px;
-  background: var(--surface);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.20);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -115,16 +116,16 @@ h1, h2, h3 {
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-start {
-  background: var(--green);
+  background: #6B7D5E;
   color: #fff;
 }
-.btn-start:hover:not(:disabled) { background: #3d5736; }
+.btn-start:hover:not(:disabled) { background: #5c6e50; }
 
 .btn-stop {
-  background: var(--red);
+  background: #F1AFA9;
   color: #fff;
 }
-.btn-stop:hover:not(:disabled) { background: #d4625b; }
+.btn-stop:hover:not(:disabled) { background: #e49e98; }
 
 /* ── Status ────────────────────────────────────────────────── */
 .status {
@@ -147,7 +148,7 @@ h1, h2, h3 {
 
 #statusText {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-primary);
   font-weight: 500;
 }
 
@@ -165,14 +166,14 @@ h1, h2, h3 {
 
 .mic-level-label {
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-primary);
   font-weight: 500;
 }
 
 .level-track {
   width: 60px;
   height: 4px;
-  background: var(--border);
+  background: #C7C7C7;
   border-radius: 2px;
   overflow: hidden;
 }
@@ -197,7 +198,7 @@ h1, h2, h3 {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ddd;
+  background: #ccc;
   display: inline-block;
 }
 
@@ -206,7 +207,7 @@ h1, h2, h3 {
 
 .conn-label {
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-primary);
   margin-right: 8px;
 }
 
@@ -278,14 +279,14 @@ body.transcript-open .calls-layout {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .avatar {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: #6B7D5E;
+  background: #9E9B93;
   color: #fff;
   display: flex;
   align-items: center;
@@ -297,6 +298,7 @@ body.transcript-open .calls-layout {
 }
 
 .client-name {
+  font-family: 'Space Grotesk', sans-serif;
   font-weight: 600;
   font-size: 15px;
   color: var(--text-primary);
