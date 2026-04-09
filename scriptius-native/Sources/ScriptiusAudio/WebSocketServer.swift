@@ -62,7 +62,13 @@ final class WebSocketServer {
         lock.unlock()
 
         for conn in conns {
-            conn.send(content: data, contentContext: context, isComplete: true, completion: .idempotent)
+            conn.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ [weak self, weak conn] error in
+                if let error = error, let conn = conn {
+                    fputs("[WS] Send error, removing client: \(error.localizedDescription)\n", stderr)
+                    self?.removeConnection(conn)
+                    conn.cancel()
+                }
+            }))
         }
     }
 
@@ -76,7 +82,12 @@ final class WebSocketServer {
         lock.unlock()
 
         for conn in conns {
-            conn.send(content: data, contentContext: context, isComplete: true, completion: .idempotent)
+            conn.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ [weak self, weak conn] error in
+                if let error = error, let conn = conn {
+                    self?.removeConnection(conn)
+                    conn.cancel()
+                }
+            }))
         }
     }
 
@@ -110,7 +121,14 @@ final class WebSocketServer {
             guard let self = self, let connection = connection else { return }
 
             if let error = error {
-                fputs("[WS] Receive error: \(error)\n", stderr)
+                let nwError = error as NSError
+                // POSIX 57 = "Socket is not connected" — normal client disconnect
+                if nwError.domain == "NSPOSIXErrorDomain" && nwError.code == 57 {
+                    fputs("[WS] Client disconnected (socket closed)\n", stderr)
+                } else {
+                    fputs("[WS] Receive error: \(error)\n", stderr)
+                }
+                self.removeConnection(connection)
                 connection.cancel()
                 return
             }

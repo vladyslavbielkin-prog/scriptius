@@ -346,8 +346,26 @@ body.transcript-open .calls-layout {
   margin-top: 2px;
 }
 
-.course-field {
+.hubspot-field {
   margin-bottom: 12px;
+}
+
+.country-course-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.country-course-row .profile-field {
+  margin-bottom: 0;
+}
+
+.country-course-row .country-field {
+  flex: 1;
+}
+
+.country-course-row .course-field {
+  flex: 1;
 }
 
 .course-select {
@@ -650,10 +668,17 @@ body.transcript-open .calls-layout {
 /* ── Value Body ────────────────────────────────────────────── */
 .value-body {
   min-height: 40px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.value-body .waiting-text {
+  grid-column: 1 / -1;
 }
 
 .value-group {
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .value-group-label {
@@ -794,10 +819,38 @@ body.transcript-open .calls-layout {
 }
 
 .offer-text li::before {
-  content: '\2022';
+  content: '\2713';
   position: absolute;
   left: 0;
   color: rgba(255, 255, 255, 0.4);
+}
+
+.offer-course-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 6px;
+}
+
+.offer-includes {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 8px;
+}
+
+.offer-includes li {
+  padding: 2px 0 2px 14px;
+  position: relative;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.4;
+}
+
+.offer-includes li::before {
+  content: '\2713';
+  position: absolute;
+  left: 0;
+  color: #27ae60;
 }
 
 .price-row {
@@ -808,7 +861,7 @@ body.transcript-open .calls-layout {
 
 .price-value {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 36px;
+  font-size: 22px;
   font-weight: 700;
   color: #fff;
 }
@@ -854,7 +907,11 @@ body.transcript-open .calls-layout {
   transition: background var(--transition);
 }
 
-.readiness-segment.filled { background: var(--green-light); }
+.readiness-segment.level-1 { background: #c0392b; }
+.readiness-segment.level-2 { background: #e74c3c; }
+.readiness-segment.level-3 { background: #f1c40f; }
+.readiness-segment.level-4 { background: #82cb67; }
+.readiness-segment.level-5 { background: #27ae60; }
 
 /* ── Waiting text ───────────────────────────────────────────── */
 .waiting-text {

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=12" />
 </head>
 <body>
 
@@ -72,13 +72,22 @@
           </div>
         </div>
 
-        <div class="profile-field course-field">
-          <label class="field-label">Course</label>
-          <select id="courseSelect" class="course-select">
-            <option value="">Select course...</option>
-            <option value="Управління командою">Управління командою &mdash; $500</option>
-            <option value="Excel для бізнесу">Excel для бізнесу &mdash; $500</option>
-          </select>
+        <div class="country-course-row">
+          <div class="profile-field country-field">
+            <label class="field-label">Country</label>
+            <select id="countrySelect" class="course-select">
+              <option value="UA">Ukraine</option>
+              <option value="US">USA</option>
+            </select>
+          </div>
+          <div class="profile-field course-field">
+            <label class="field-label">Course</label>
+            <select id="courseSelect" class="course-select">
+              <option value="">Select course...</option>
+              <option value="Управління командою">Управління командою &mdash; $500</option>
+              <option value="Excel для бізнесу">Excel для бізнесу &mdash; $500</option>
+            </select>
+          </div>
         </div>
 
         <div class="profile-grid">
@@ -98,14 +107,9 @@
             <span class="field-label">Industry</span>
             <span id="statIndustry" class="field-value">&mdash;</span>
           </div>
-          <div class="profile-field">
-            <span class="field-label">Pain Points</span>
-            <span id="fieldPainPoints" class="field-value">&mdash;</span>
-          </div>
-          <div class="profile-field">
-            <span class="field-label">Goal</span>
-            <span id="fieldGoal" class="field-value">&mdash;</span>
-          </div>
+          <!-- Pain Points and Goal hidden from UI but kept in backend for value question triggers -->
+          <span id="fieldPainPoints" style="display:none"></span>
+          <span id="fieldGoal" style="display:none"></span>
         </div>
       </div>
 
@@ -156,7 +160,7 @@
             </div>
             <div class="question-item" data-qid="q-pain">
               <input type="checkbox" class="question-check" />
-              <span class="question-text">З якими основними проблемами ви зараз стикаєтесь і яких цілей хочете досягти?</span>
+              <span class="question-text">Скажіть, а чим зацікавив вас наш курс? Чим він міг би бути вам корисним?</span>
               <span class="question-badge"></span>
             </div>
           </div>
@@ -321,6 +325,6 @@
   <div id="micValue">0</div>
 </div>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

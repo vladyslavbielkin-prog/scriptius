@@ -134,8 +134,8 @@ MAX_RECONNECTS = 10
 
 async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
                          websocket: WebSocket, credentials, session_id: str,
-                         callbacks: EventCallbacks = None):
-    """Stream audio to Google Speech v2 with chirp model for uk-UA."""
+                         callbacks: EventCallbacks = None, language: str = "uk-UA"):
+    """Stream audio to Google Speech v2 with chirp model."""
     from google.cloud.speech_v2 import SpeechAsyncClient
     from google.cloud.speech_v2.types import cloud_speech
     from google.api_core.client_options import ClientOptions
@@ -154,7 +154,7 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
             sample_rate_hertz=16000,
             audio_channel_count=1,
         ),
-        language_codes=["uk-UA"],
+        language_codes=[language, "en-US", "ru-RU"] if language != "en-US" else ["en-US", "uk-UA", "ru-RU"],
         model="chirp",
         features=cloud_speech.RecognitionFeatures(
             enable_automatic_punctuation=True,
@@ -336,17 +336,26 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
 
 async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
                          websocket: WebSocket, credentials, session_id: str,
-                         callbacks: EventCallbacks = None):
-    """Stream audio to Google Speech v1 with latest_long model for uk-UA."""
+                         callbacks: EventCallbacks = None, language: str = "uk-UA"):
+    """Stream audio to Google Speech v1 with latest_long model."""
     from google.cloud import speech as speech_v1
 
     client = speech_v1.SpeechAsyncClient(credentials=credentials)
+
+    # Set primary and alternative languages based on session language
+    if language == "en-US":
+        primary_lang = "en-US"
+        alt_langs = ["uk-UA", "ru-RU"]
+    else:
+        primary_lang = "uk-UA"
+        alt_langs = ["en-US", "ru-RU"]
 
     streaming_config = speech_v1.StreamingRecognitionConfig(
         config=speech_v1.RecognitionConfig(
             encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=16000,
-            language_code="uk-UA",
+            language_code=primary_lang,
+            alternative_language_codes=alt_langs,
             model="latest_long",
             enable_automatic_punctuation=True,
         ),
@@ -572,14 +581,22 @@ async def audio_ws(websocket: WebSocket):
     queues = {0: client_queue, 1: sales_queue}
     speakers = {0: "client", 1: "sales"}
 
+    def get_stt_language():
+        """Get STT language code based on session forced language."""
+        fl = session.forced_language
+        if fl and "english" in fl.lower():
+            return "en-US"
+        return "uk-UA"
+
     def ensure_stt(track: int):
         if track not in stt_tasks:
             q = queues[track]
             sp = speakers[track]
+            lang = get_stt_language()
             stt_tasks[track] = asyncio.create_task(
-                stream_fn(q, sp, websocket, credentials, session_id, callbacks)
+                stream_fn(q, sp, websocket, credentials, session_id, callbacks, language=lang)
             )
-            logger.info(f"[{session_id}][{sp}] STT stream started (first audio received)")
+            logger.info(f"[{session_id}][{sp}] STT stream started (lang={lang}, first audio received)")
 
     try:
         while True:
@@ -635,6 +652,7 @@ async def audio_ws(websocket: WebSocket):
                             if client_fields:
                                 session.update_profile(client_fields)
                                 logger.info(f"[{session_id}] HubSpot prefill applied: {list(client_fields.keys())}")
+                                analyzer.update_qualification_questions()
                                 try:
                                     await websocket.send_json({
                                         "type": "analysis",
@@ -665,6 +683,11 @@ async def audio_ws(websocket: WebSocket):
                         except Exception:
                             pass
                         analyzer.trigger_fast()
+                    elif msg_type == "setLanguage":
+                        lang = data.get("language", "Ukrainian")
+                        session.forced_language = lang
+                        analyzer.update_qualification_questions()
+                        logger.info(f"[{session_id}] Language set to: {lang}")
                     elif msg_type == "note":
                         note_text = data.get("text", "")
                         if note_text:

@@ -22,6 +22,7 @@ class CallSession:
         self.call_start_time: float = time.time()
         self.notes: list = []
         self.locked_summary: list[str] = []
+        self.forced_language: str | None = None  # "English" or "Ukrainian"
 
     def add_transcript(self, speaker: str, text: str) -> None:
         mapped = SPEAKER_MAP.get(speaker, speaker)
@@ -57,7 +58,7 @@ class CallSession:
 
     def update_profile(self, fields: dict) -> None:
         for k, v in fields.items():
-            if k in self.client_profile:
+            if k in self.client_profile and v is not None:
                 self.client_profile[k] = v
 
     def get_filled_profile_fields(self) -> int:

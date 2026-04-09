@@ -63,39 +63,56 @@ async def _hs_get(path: str, token: str = "") -> dict:
 
 async def fetch_deal_with_contact(deal_id: str) -> dict:
     """Fetch deal + first associated contact. Returns Scriptius fields."""
+    # Fetch deal with all custom properties
     deal = await _hs_get(
         f"/crm/v3/objects/deals/{deal_id}"
-        f"?properties=dealname,amount&associations=contacts"
+        f"?properties=dealname,amount,position,experience,company,industry"
+        f"&associations=contacts"
     )
     if not deal:
         return {}
 
     result = {}
-    deal_props = deal.get("properties", {})
-    if deal_props.get("dealname"):
-        result["_dealName"] = deal_props["dealname"]
+    dp = deal.get("properties", {})
 
-    # Get first associated contact
+    # Deal name → Course
+    if dp.get("dealname"):
+        result["course"] = dp["dealname"]
+    # Deal properties → Client card
+    if dp.get("position"):
+        result["role"] = dp["position"]
+    if dp.get("experience"):
+        result["experience"] = dp["experience"]
+    if dp.get("company"):
+        result["company"] = dp["company"]
+    if dp.get("industry"):
+        result["industry"] = dp["industry"]
+
+    # Get contact for name + phone
     assoc = deal.get("associations", {}).get("contacts", {}).get("results", [])
     if assoc:
         cid = str(assoc[0].get("id", ""))
         if cid:
             contact = await _hs_get(
                 f"/crm/v3/objects/contacts/{cid}"
-                f"?properties=firstname,lastname,phone,mobilephone,jobtitle,company,industry"
+                f"?properties=firstname,lastname,phone,mobilephone,jobtitle,company,industry,experience"
             )
             props = contact.get("properties", {})
+            # Lead name → Name
             first = props.get("firstname", "") or ""
             last = props.get("lastname", "") or ""
             name = f"{first} {last}".strip()
             if name:
                 result["name"] = name
-            if props.get("jobtitle"):
+            # Fill from contact only if not already set from deal
+            if not result.get("role") and props.get("jobtitle"):
                 result["role"] = props["jobtitle"]
-            if props.get("company"):
+            if not result.get("company") and props.get("company"):
                 result["company"] = props["company"]
-            if props.get("industry"):
+            if not result.get("industry") and props.get("industry"):
                 result["industry"] = props["industry"]
+            if not result.get("experience") and props.get("experience"):
+                result["experience"] = props["experience"]
             result["_phone"] = props.get("mobilephone") or props.get("phone") or ""
 
     return result
@@ -222,7 +239,7 @@ async def fetch_deal_json(deal_id: str = Query(default="")):
     if not data:
         return {"status": "error", "message": "could not fetch deal"}
     # Return only client card fields
-    CARD_FIELDS = {"name", "role", "company", "industry", "experience"}
+    CARD_FIELDS = {"name", "role", "company", "industry", "experience", "course"}
     client_fields = {k: v for k, v in data.items() if k in CARD_FIELDS and v}
     set_prefill(data)
     logger.info(f"Fetch deal {deal_id}: {client_fields}")

@@ -132,6 +132,9 @@ function connectBackend() {
   backendWs.onopen = () => {
     console.log('[Backend] Connected');
     backendDot.className = 'conn-dot connected';
+    // Send language before start_call so the session knows the language from the start
+    const lang = currentLang === 'en' ? 'English' : 'Ukrainian';
+    backendWs.send(JSON.stringify({ type: 'setLanguage', language: lang }));
     backendWs.send(JSON.stringify({ type: 'start_call' }));
   };
 
@@ -412,9 +415,8 @@ function handleAnalysis(data) {
   if (data.valueStatus) handleValueStatus(data.valueStatus);
   if (data.clientProfile) updateClientProfile(data.clientProfile);
   if (data.summary) renderSummary(data.summary);
-  if (data.sentiment) renderSentiment(data.sentiment);
-  if (data.objectionHandling) renderObjection(data.objectionHandling);
   if (data.recommendedOffer) renderOffer(data.recommendedOffer);
+  calculateReadiness();
 }
 
 // ── Summary Rendering ───────────────────────────────────────
@@ -460,51 +462,78 @@ function renderObjection(text) {
 function renderOffer(offerData) {
   const offerEl = document.getElementById('offerText');
   const priceRow = document.getElementById('priceRow');
+  const t = QUESTIONS_I18N[currentLang] || QUESTIONS_I18N.uk;
 
-  if (typeof offerData === 'object' && offerData.items) {
-    const items = Array.isArray(offerData.items) ? offerData.items : [];
-    offerEl.className = 'offer-text';
-    offerEl.innerHTML = '<ul>' + items.map(item =>
-      `<li>${item}</li>`
-    ).join('') + '</ul>';
+  // Use the currently selected course, not the AI's suggestion
+  const courseSelect = document.getElementById('courseSelect');
+  const courseName = courseSelect ? courseSelect.value : '';
 
-    if (offerData.price) {
-      priceRow.style.display = 'block';
-      document.getElementById('priceCurrent').textContent = offerData.price;
-    }
+  offerEl.className = 'offer-text';
+
+  if (courseName) {
+    offerEl.innerHTML = `
+      <div class="offer-course-name">${courseName}</div>
+      <ul class="offer-includes">
+        <li>${t.offerCert}</li>
+        <li>${t.offerLms}</li>
+        <li>${t.offerProject}</li>
+      </ul>
+    `;
+    priceRow.style.display = 'block';
+    document.getElementById('priceCurrent').textContent = '$500';
   } else {
-    offerEl.className = 'offer-text';
-    offerEl.textContent = typeof offerData === 'string' ? offerData : JSON.stringify(offerData);
+    // No course selected — show bullet points without course name
+    offerEl.innerHTML = `
+      <ul class="offer-includes">
+        <li>${t.offerCert}</li>
+        <li>${t.offerLms}</li>
+        <li>${t.offerProject}</li>
+      </ul>
+    `;
+    priceRow.style.display = 'none';
   }
 }
 
 // ── Readiness Bar ───────────────────────────────────────────
 
-function updateReadiness(sentimentText) {
+function updateReadiness(level) {
   const segments = document.querySelectorAll('.readiness-segment');
   const valueEl = document.getElementById('readinessValue');
-  let filled = 1;
-  let label = 'Low';
 
-  if (sentimentText.includes('positive') || sentimentText.includes('\u043F\u043E\u0437\u0438\u0442\u0438\u0432')) {
-    filled = 5; label = 'Ready';
-  } else if (sentimentText.includes('neutral') || sentimentText.includes('\u043D\u0435\u0439\u0442\u0440\u0430\u043B')) {
-    filled = 3; label = 'Neutral';
-  } else if (sentimentText.includes('skepti') || sentimentText.includes('\u0441\u043A\u0435\u043F\u0442\u0438')) {
-    filled = 2; label = 'Skeptical';
-  } else if (sentimentText.includes('negative') || sentimentText.includes('\u043D\u0435\u0433\u0430\u0442\u0438\u0432')) {
-    filled = 1; label = 'Low';
-  }
+  // level is 1-5, calculate from qualification + needs progress
+  if (typeof level !== 'number') level = 1;
+  level = Math.max(1, Math.min(5, level));
 
-  const colors = { 1: '#8B1A1A', 2: '#E8837C', 3: '#E8C547', 4: '#6BBF6A', 5: '#2D7A2D' };
-  valueEl.textContent = label;
-  valueEl.style.color = colors[filled] || '#fff';
+  const labels = { 1: 'Low', 2: 'Early', 3: 'Neutral', 4: 'Warm', 5: 'Ready' };
+  const labelColors = { 1: '#c0392b', 2: '#e74c3c', 3: '#f1c40f', 4: '#82cb67', 5: '#27ae60' };
+
+  valueEl.textContent = labels[level];
+  valueEl.style.color = labelColors[level];
 
   segments.forEach((seg, i) => {
-    seg.classList.toggle('filled', i < filled);
-    if (i < filled) seg.style.background = colors[filled];
-    else seg.style.background = '';
+    // Remove all level classes
+    seg.className = 'readiness-segment';
+    if (i < level) {
+      seg.classList.add(`level-${i + 1}`);
+    }
   });
+}
+
+function calculateReadiness() {
+  // Count checked qualification questions
+  const qualChecked = document.querySelectorAll('#sectionQualification .question-check:checked').length;
+  // Count checked value questions
+  const valueChecked = document.querySelectorAll('#sectionValue .question-check:checked').length;
+  // Count client needs
+  const needsCount = document.querySelectorAll('#summaryList li:not(.waiting-text)').length;
+
+  let level = 1;
+  if (qualChecked >= 2) level = 2;
+  if (qualChecked >= 4 && needsCount >= 1) level = 3;
+  if (qualChecked >= 4 && needsCount >= 3) level = 4;
+  if (qualChecked >= 4 && needsCount >= 3 && valueChecked >= 2) level = 5;
+
+  updateReadiness(level);
 }
 
 // ── Client Profile ──────────────────────────────────────────
@@ -897,6 +926,201 @@ function initCourseSelector() {
   });
 }
 
+// ── Country Selector ────────────────────────────────────────
+
+// Global language state
+let currentLang = 'uk'; // 'uk' or 'en'
+
+const QUESTIONS_I18N = {
+  uk: {
+    available: 'Чи зручно вам зараз розмовляти?',
+    role: 'Яка ваша посада та в якій індустрії ви працюєте?',
+    experience: 'Скільки років ви уже працюєте у цій сфері?',
+    company: 'В якій компанії ви працюєте?',
+    industry: 'В якій індустрії ви працюєте?',
+    pain: 'Скажіть, а чим зацікавив вас наш курс? Чим він міг би бути вам корисним?',
+    confirmPrefix: 'Бачу що ви вказали, що',
+    confirmRole: 'працюєте',
+    confirmIndustry: 'в {val} індустрії',
+    confirmCompany: 'в компанії',
+    confirmExpYears: 'уже {val} років',
+    confirmExpLevel: 'на рівні',
+    confirmExp: 'уже',
+    confirmSuffix: '. Скажіть, все вірно?',
+    offerCert: 'Сертифікат про закінчення курсу',
+    offerLms: 'Доступ до LMS платформи та спільноти',
+    offerProject: 'Фінальний проєкт з менторською підтримкою',
+    needsTitle: 'Client Needs & Problems',
+    waitingNeeds: 'Waiting for conversation...',
+    waitingOffer: 'Waiting for analysis...',
+  },
+  en: {
+    available: 'Is it a good time to talk right now?',
+    role: 'What is your current position and industry?',
+    experience: 'How many years of experience do you have in this field?',
+    company: 'What company do you work for?',
+    industry: 'What industry are you in?',
+    pain: 'What interested you in our course? How could it be useful for you?',
+    confirmPrefix: 'I see that you mentioned you',
+    confirmRole: 'work as',
+    confirmIndustry: 'in the {val} industry',
+    confirmCompany: 'at',
+    confirmExpYears: 'for {val} years',
+    confirmExpLevel: 'at the level of',
+    confirmExp: 'for',
+    confirmSuffix: '. Is that correct?',
+    offerCert: 'Certificate of completion',
+    offerLms: 'Access to LMS platform and community',
+    offerProject: 'Final project with mentor support',
+    needsTitle: 'Client Needs & Problems',
+    waitingNeeds: 'Waiting for conversation...',
+    waitingOffer: 'Waiting for analysis...',
+  },
+};
+
+function initCountrySelector() {
+  const select = document.getElementById('countrySelect');
+  if (!select) return;
+
+  select.addEventListener('change', (e) => {
+    const country = e.target.value;
+    currentLang = country === 'US' ? 'en' : 'uk';
+
+    // Send language to backend
+    if (backendWs && backendWs.readyState === WebSocket.OPEN) {
+      backendWs.send(JSON.stringify({ type: 'setLanguage', language: currentLang === 'en' ? 'English' : 'Ukrainian' }));
+    }
+
+    // Update qualification questions in current language
+    // Re-read current profile from UI
+    const profile = {
+      role: document.getElementById('fieldPosition')?.textContent,
+      experience: document.getElementById('statExperience')?.textContent,
+      company: document.getElementById('statCompany')?.textContent,
+      industry: document.getElementById('statIndustry')?.textContent,
+    };
+    // Clean empty values
+    for (const k of Object.keys(profile)) {
+      if (!profile[k] || profile[k] === '—') delete profile[k];
+    }
+    rebuildQualificationQuestions(profile);
+
+    select.classList.add('has-value');
+  });
+}
+
+// ── Dynamic Qualification Questions ────────────────────────
+
+function rebuildQualificationQuestions(profile) {
+  const grid = document.querySelector('#sectionQualification .questions-grid');
+  if (!grid) return;
+
+  // Map of profile fields to their labels and question IDs
+  const fieldMap = {
+    role: { label: 'посада', qid: 'q-role' },
+    experience: { label: 'досвід', qid: 'q-experience' },
+    company: { label: 'компанія', qid: 'q-company' },
+    industry: { label: 'індустрія', qid: 'q-industry' },
+  };
+
+  // Split fields into known and missing
+  const known = {};
+  const missing = [];
+  for (const [field, info] of Object.entries(fieldMap)) {
+    if (profile[field]) {
+      known[field] = profile[field];
+    } else {
+      missing.push(info);
+    }
+  }
+
+  const t = QUESTIONS_I18N[currentLang] || QUESTIONS_I18N.uk;
+
+  // Always start with q-available
+  const questions = [
+    { id: 'q-available', text: t.available },
+  ];
+
+  // If we have some known data, add natural-sounding confirmation question
+  if (Object.keys(known).length > 0) {
+    const parts = [];
+    if (known.role) parts.push(`${t.confirmRole} ${known.role}`);
+    if (known.industry) parts.push(t.confirmIndustry.replace('{val}', known.industry));
+    if (known.company) parts.push(`${t.confirmCompany} ${known.company}`);
+    if (known.experience) {
+      const exp = known.experience;
+      const isLevel = /junior|mid|senior|lead|head|джуніор|мідл|сеніор/i.test(exp);
+      if (isLevel) parts.push(`${t.confirmExpLevel} ${exp}`);
+      else if (/^\d+$/.test(exp)) parts.push(t.confirmExpYears.replace('{val}', exp));
+      else parts.push(`${t.confirmExp} ${exp}`);
+    }
+    const text = `${t.confirmPrefix} ${parts.join(' ')}${t.confirmSuffix}`;
+    questions.push({
+      id: 'q-confirm',
+      text,
+    });
+  }
+
+  // Add questions for missing fields (up to max 4 total)
+  const missingQuestions = {
+    'q-role': t.role,
+    'q-experience': t.experience,
+    'q-company': t.company,
+    'q-industry': t.industry,
+  };
+
+  for (const info of missing) {
+    if (questions.length >= 4) break;
+    if (missingQuestions[info.qid]) {
+      questions.push({ id: info.qid, text: missingQuestions[info.qid] });
+    }
+  }
+
+  // Always add pain question if room
+  if (questions.length < 4) {
+    questions.push({
+      id: 'q-pain',
+      text: t.pain,
+    });
+  }
+
+  // Rebuild the grid HTML
+  grid.innerHTML = '';
+  const group1 = document.createElement('div');
+  group1.className = 'questions-group';
+  const group2 = document.createElement('div');
+  group2.className = 'questions-group';
+
+  questions.forEach((q, i) => {
+    const item = document.createElement('div');
+    item.className = 'question-item';
+    item.dataset.qid = q.id;
+    item.innerHTML = `
+      <input type="checkbox" class="question-check" />
+      <span class="question-text">${q.text}</span>
+      <span class="question-badge"></span>
+    `;
+    item.querySelector('.question-check').addEventListener('change', () => {
+      updateSectionStates();
+      calculateReadiness();
+    });
+    // Split into two columns
+    if (i < Math.ceil(questions.length / 2)) {
+      group1.appendChild(item);
+    } else {
+      group2.appendChild(item);
+    }
+  });
+
+  grid.appendChild(group1);
+  if (group2.children.length > 0) {
+    grid.appendChild(group2);
+  }
+
+  // Update backend qualification questions list
+  window._dynamicQualQuestions = questions;
+}
+
 // ── HubSpot Deal Loader ────────────────────────────────────
 
 function initHubspotLoader() {
@@ -946,8 +1170,41 @@ function initHubspotLoader() {
         if (p.industry) document.getElementById('statIndustry').textContent = p.industry;
         if (p.experience) document.getElementById('statExperience').textContent = p.experience;
 
+        // Set course from deal name
+        if (p.course) {
+          const select = document.getElementById('courseSelect');
+          // Check if course exists in dropdown
+          let found = false;
+          for (const opt of select.options) {
+            if (opt.value === p.course) { found = true; break; }
+          }
+          // If not in dropdown, add it as a new option
+          if (!found) {
+            const newOpt = document.createElement('option');
+            newOpt.value = p.course;
+            newOpt.textContent = p.course;
+            select.appendChild(newOpt);
+          }
+          select.value = p.course;
+          select.classList.add('has-value');
+          select.dispatchEvent(new Event('change'));
+        }
+
+        // Rebuild qualification questions based on available data
+        rebuildQualificationQuestions(p);
+
         btn.textContent = '\u2713';
         btn.className = 'hubspot-btn success';
+
+        // Auto-start call after HubSpot data loaded
+        if (!capturing) {
+          btnStart.disabled = true;
+          statusText.textContent = 'Starting...';
+          try { await startCapture(); } catch (err) {
+            errorMsg.textContent = err.message;
+            setIdleUI();
+          }
+        }
       } else {
         btn.textContent = '!';
         btn.className = 'hubspot-btn error';
@@ -976,6 +1233,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initRouter();
   initCheckboxListeners();
   initCourseSelector();
+  initCountrySelector();
   initHubspotLoader();
   updateSectionStates();
 

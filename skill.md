@@ -9,25 +9,21 @@ How each component works during a live sales call.
 **What it shows**: Real-time profile of the person you're talking to.
 
 **Fields**:
-- **Name** — client's name
-- **Position** — job title/role
-- **Experience** — years in the field
-- **Company** — where they work
-- **Industry** — their sector
-- **Pain Points** — problems they mentioned
-- **Goal** — what they want to achieve
+- **HubSpot Deal** — paste a deal URL or ID to auto-fill client data from HubSpot
 - **Course** — manually selected by the sales rep
+- **Position** / **Experience** — job title and years in the field
+- **Company** / **Industry** — where they work and their sector
+- **Pain Points** / **Goal** — problems and objectives mentioned
 
 **How it updates**:
-- Powered by `gemini-2.5-flash-lite` (fast analysis, 0.1s debounce after each transcript)
-- Extracts info from BOTH client and sales rep lines (the rep often repeats/confirms client info)
-- Fields fill in as the conversation progresses — once set, they update only if the conversation contradicts them
-- Pre-known CRM data is preserved unless the conversation overrides it
+- **From HubSpot**: paste a deal URL → name, role, company, industry fill instantly from the associated contact
+- **From conversation**: powered by `gemini-2.5-flash-lite` (fast analysis, 0.1s debounce after each transcript). Extracts info from both client and sales rep lines
+- Fields fill as the conversation progresses — once set, they update only if the conversation contradicts them
 
 **Tips**:
+- Paste the HubSpot deal URL before starting the call to pre-fill the card
 - Select the course manually before the call starts
-- The card fills fastest when you ask direct questions: "What's your role?", "How long have you been doing this?"
-- Even if only the sales rep's mic is active, the system extracts info from rep's lines (useful in single-mic test mode)
+- Even if only the sales rep's mic is active, the system extracts info from rep's lines
 
 ---
 
@@ -56,20 +52,39 @@ How each component works during a live sales call.
 
 ## 3. Recommended Offer
 
-**What it shows**: The best-fit course/product to pitch, with price and a short reason why it fits.
+**What it shows**: The best-fit course with what the client gets and the price.
+
+**What the client gets** (shown as checkmarks):
+- Сертифікат про закінчення курсу
+- Доступ до LMS платформи та спільноти
+- Фінальний проєкт з менторською підтримкою
+
+**Price**: $500
+
+**Available courses**:
+- **Управління командою** — $500
+- **Excel для бізнесу** — $500
 
 **How it works**:
 - Powered by `gemini-2.5-flash` (full analysis, 1.5s debounce)
-- Analyzes the full conversation transcript
-- Matches client needs to available courses:
-  - **Управління командою** — $500
-  - **Excel для бізнесу** — $500
+- Analyzes the full conversation transcript to pick the best-fit course
 - Updates as more context becomes available
 
+### Client Readiness Bar
+
+Shows how ready the client is to hear the offer. Each segment has its own color:
+
+| Level | Color | Label | When it triggers |
+|---|---|---|---|
+| 1 | Dark red | Low | Default (start of call) |
+| 2 | Light red | Early | 2+ qualification questions checked |
+| 3 | Yellow | Neutral | All 4 qualification questions + 1 client need |
+| 4 | Light green | Warm | All 4 qualification + 3 needs |
+| 5 | Dark green | Ready | All 4 qualification + 3 needs + 2 value questions asked |
+
 **Tips**:
-- The recommendation improves as the conversation progresses — more needs = better match
-- Use it as a guide, not a script — adapt the recommendation to the flow of the conversation
-- The "Client Readiness" bar shows how ready the client is to hear the offer
+- Wait until readiness is at least "Warm" (level 4) before presenting the offer
+- Read back the client's needs from the list, then present the course + price
 
 ---
 
@@ -102,11 +117,13 @@ How each component works during a live sales call.
 
 ## 5. Value Justification Questions
 
-**What it shows**: AI-generated personalized sales questions tailored to the client's profile.
+**What it shows**: AI-generated personalized sales questions in two rounds, displayed side by side.
+
+**Layout**: Two columns — Round 1 (left) and Round 2 (right).
 
 **How it works**:
-- **Batch 1** (5 questions) — generated when ≥2 profile tag fields are filled (industry, experience, company, painPoints, goal)
-- **Batch 2** (5 deeper follow-ups) — generated when ≥2 questions from batch 1 have been asked
+- **Round 1** (5 questions) — generated when 2+ profile tag fields are filled (industry, experience, company, painPoints, goal)
+- **Round 2** (5 deeper follow-ups) — generated when 2+ questions from round 1 have been asked
 - Powered by `gemini-2.5-flash-lite`
 - Questions are personalized based on the client's industry, role, and pain points
 
@@ -124,15 +141,39 @@ How each component works during a live sales call.
 **Tips**:
 - Don't read the questions word-for-word — use them as conversation guides
 - The questions are ordered strategically — try to follow the order
-- When ≥2 questions from batch 1 are asked, batch 2 appears automatically with deeper follow-ups
+- After asking round 1 questions, round 2 appears automatically with deeper follow-ups
 - The checkboxes next to each question track whether you've asked it (recognized by meaning, not exact wording)
+
+---
+
+## 6. HubSpot Integration
+
+**What it does**: Auto-fills the client card from a HubSpot deal.
+
+**How to use**:
+1. Open the deal in HubSpot → copy the URL from the browser bar
+2. Paste it into the **HubSpot Deal** field in Scriptius (top of the client card)
+3. Press Enter or click the arrow button
+4. Name, role, company, industry fill in immediately
+
+**What gets pulled**:
+
+| HubSpot Contact Field | Scriptius Client Card |
+|---|---|
+| First name + Last name | Name |
+| Job title | Position |
+| Company name | Company |
+| Industry | Industry |
+
+**Setup**: See [docs/hubspot-setup.md](docs/hubspot-setup.md) for full setup instructions.
 
 ---
 
 ## Call Flow Summary
 
-1. **Start call** → Select course → Begin qualification questions
-2. **Qualification** → Ask the 4 qualifying questions → Client card fills in
-3. **Value Justification** → Once ≥2 profile fields filled, personalized questions appear → Ask them
-4. **Client Needs** → As the client confirms problems, they appear in the needs list
-5. **Offer** → When enough needs are identified, read back the needs list → Present the recommended offer
+1. **Before the call** → Paste HubSpot deal URL → Client card fills → Select course
+2. **Qualification** → Ask the 4 qualifying questions → Client card fills in more
+3. **Value Justification** → Once 2+ profile fields filled, round 1 questions appear → Ask them → Round 2 appears
+4. **Client Needs** → As the client confirms problems, they appear in the needs list (up to 20)
+5. **Check readiness** → Wait for "Warm" or "Ready" (green bar)
+6. **Offer** → Read back the client's needs from the list → Present the course, what they get, and the price

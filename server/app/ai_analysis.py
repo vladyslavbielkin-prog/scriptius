@@ -22,38 +22,102 @@ FULL_DEBOUNCE_S = 1.5
 
 # ── Qualification questions ──────────────────────────────────────────────────
 
-QUALIFICATION_QUESTIONS = [
+DEFAULT_QUALIFICATION_QUESTIONS = [
     {"id": "q-available", "text": "Чи зручно вам зараз розмовляти?"},
     {"id": "q-role", "text": "Яка ваша посада та в якій індустрії ви працюєте?"},
     {"id": "q-experience", "text": "Скільки років ви уже працюєте у цій сфері?"},
-    {"id": "q-pain", "text": "З якими основними проблемами ви зараз стикаєтесь і яких цілей хочете досягти?"},
+    {"id": "q-pain", "text": "Скажіть, а чим зацікавив вас наш курс? Чим він міг би бути вам корисним?"},
 ]
 
-# ── Prompts (verbatim from production server.js) ─────────────────────────────
 
-_q_list = "\n".join(
-    f'   {i}. [id="{q["id"]}"] "{q["text"]}"'
-    for i, q in enumerate(QUALIFICATION_QUESTIONS)
-)
+def build_qualification_questions(profile: dict) -> list[dict]:
+    """Build dynamic qualification questions based on available profile data."""
+    known = {}
+    field_map = {
+        "role": "посада",
+        "experience": "досвід",
+        "company": "компанія",
+        "industry": "індустрія",
+    }
+    for field, label in field_map.items():
+        val = profile.get(field)
+        if val:
+            known[field] = val
 
-FAST_PROMPT = f"""You are analyzing a live sales call transcript. Be FAST and concise.
+    # Always start with availability
+    questions = [{"id": "q-available", "text": "Чи зручно вам зараз розмовляти?"}]
+
+    if known:
+        # Build natural-sounding confirmation question
+        text = "Бачу що ви вказали, що"
+        parts = []
+        if known.get("role"):
+            parts.append(f"працюєте {known['role']}")
+        if known.get("industry"):
+            parts.append(f"в {known['industry']} індустрії")
+        if known.get("company"):
+            parts.append(f"в компанії {known['company']}")
+        if known.get("experience"):
+            exp = known["experience"]
+            # Check if it's a level (Junior/Mid/Senior) or years
+            if any(lvl in exp.lower() for lvl in ["junior", "mid", "senior", "lead", "head", "джуніор", "мідл", "сеніор"]):
+                parts.append(f"на рівні {exp}")
+            elif exp.isdigit():
+                parts.append(f"уже {exp} років")
+            else:
+                parts.append(f"уже {exp}")
+        text += " " + " ".join(parts) + ". Скажіть, все вірно?"
+        questions.append({
+            "id": "q-confirm",
+            "text": text,
+        })
+
+    # Add questions for missing fields
+    missing_qs = {
+        "role": {"id": "q-role", "text": "Яка ваша посада та в якій індустрії ви працюєте?"},
+        "experience": {"id": "q-experience", "text": "Скільки років ви уже працюєте у цій сфері?"},
+        "company": {"id": "q-company", "text": "В якій компанії ви працюєте?"},
+        "industry": {"id": "q-industry", "text": "В якій індустрії ви працюєте?"},
+    }
+    for field, q in missing_qs.items():
+        if field not in known and len(questions) < 4:
+            questions.append(q)
+
+    # Always add pain question if room
+    if len(questions) < 4:
+        questions.append({
+            "id": "q-pain",
+            "text": "Скажіть, а чим зацікавив вас наш курс? Чим він міг би бути вам корисним?",
+        })
+
+    return questions[:4]
+
+
+def build_fast_prompt(qualification_questions: list[dict]) -> str:
+    """Build the fast analysis prompt with dynamic qualification questions."""
+    q_list = "\n".join(
+        f'   {i}. [id="{q["id"]}"] "{q["text"]}"'
+        for i, q in enumerate(qualification_questions)
+    )
+
+    return f"""You are analyzing a live sales call transcript. Be FAST and concise.
 
 Transcript lines are prefixed with [Sales Rep] or [Client].
 
 Do THREE things:
 
 1. **Qualification Tracking** — check these questions:
-{_q_list}
+{q_list}
 
    For each, return status:
-   - "asked" — rep asked this OR any question covering the same info (match by MEANING, any language). Example: "What do you do?" covers q-role. "Tell me about your challenges" covers q-pain.
-   - "answered" — client mentioned this info without being asked. Example: "I'm a marketing manager" → q-role answered.
+   - "asked" — rep asked this OR any question covering the same info (match by MEANING, any language). Example: "What do you do?" covers q-role. "Tell me about your challenges" covers q-pain. "Бачу ви вказали..." covers q-confirm.
+   - "answered" — client mentioned this info without being asked, OR client confirmed/agreed (e.g. "так", "вірно", "да"). Example: "I'm a marketing manager" → q-role answered. Client says "так, вірно" after confirmation question → q-confirm answered.
    - null — not yet asked or mentioned.
 
 2. **Client Profile** — extract any info about the CLIENT mentioned ANYWHERE in the transcript (from client statements OR from rep paraphrasing/confirming client info). Return null if truly unknown.
    Fields: name, role, company, industry, experience, painPoints, goal, course
 
-   IMPORTANT: Extract even if the info comes from [Sales Rep] lines — the rep often repeats/confirms what the client said, or speaks on behalf of client in single-mic test mode. Example: "[Sales Rep]: I work in marketing" → industry: "marketing". "[Sales Rep]: So you manage a team of 5" → experience/role info about team management.
+   IMPORTANT: Extract even if the info comes from [Sales Rep] lines — the rep often repeats/confirms what the client said, or speaks on behalf of client in single-mic test mode.
 
    "course" is the course/product being discussed in the sales call.
 
@@ -145,7 +209,9 @@ def _parse_json(text: str):
     return None
 
 
-def detect_conversation_language(conversation: list[dict]) -> str:
+def detect_conversation_language(conversation: list[dict], forced: str | None = None) -> str:
+    if forced:
+        return forced
     if not conversation:
         return "Ukrainian"
     full_text = " ".join(e["text"] for e in conversation)
@@ -167,6 +233,14 @@ class CallAnalyzer:
         self._is_full_running = False
         self._is_generating_batch = False
         self._client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        # Build dynamic qualification questions based on prefilled profile
+        self._qual_questions = build_qualification_questions(session.client_profile)
+        self._fast_prompt = build_fast_prompt(self._qual_questions)
+
+    def update_qualification_questions(self):
+        """Rebuild qualification questions after profile update (e.g. HubSpot prefill)."""
+        self._qual_questions = build_qualification_questions(self.session.client_profile)
+        self._fast_prompt = build_fast_prompt(self._qual_questions)
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -229,7 +303,7 @@ class CallAnalyzer:
             recent = self.session.conversation[-10:]
             context_lines = "\n".join(f"[{e['speaker']}]: {e['text']}" for e in recent)
 
-            language = detect_conversation_language(self.session.conversation)
+            language = detect_conversation_language(self.session.conversation, self.session.forced_language)
 
             prompt = f"""You analyze a sales call. Extract CONFIRMED client needs/problems/goals.
 
@@ -330,7 +404,7 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
                 needs_lines = "\n".join(f"- {n}" for n in self.session.locked_summary)
                 needs_ctx = f"\n\nExisting client needs (DO NOT repeat these):\n{needs_lines}"
 
-            prompt = FAST_PROMPT + prefill_ctx + value_ctx + needs_ctx
+            prompt = self._fast_prompt + prefill_ctx + value_ctx + needs_ctx
             logger.info(f"[{sid}][AI] Fast analysis triggered (debounce {FAST_DEBOUNCE_S}s)")
 
             response = await asyncio.to_thread(self._client.models.generate_content,
@@ -441,7 +515,7 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
 
         try:
             transcript = self.session.get_transcript_text()
-            language = detect_conversation_language(self.session.conversation)
+            language = detect_conversation_language(self.session.conversation, self.session.forced_language)
 
             lang_ctx = (
                 f"\n\nIMPORTANT: The conversation is in {language}. "
@@ -485,7 +559,7 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
             profile_summary = "\n".join(
                 f"{k}: {v}" for k, v in self.session.client_profile.items() if v is not None
             )
-            language = detect_conversation_language(self.session.conversation)
+            language = detect_conversation_language(self.session.conversation, self.session.forced_language)
             logger.info(f"[{sid}][AI] Detected conversation language: {language}")
 
             prompt_fn = _value_prompt_batch2 if batch == 2 else _value_prompt
