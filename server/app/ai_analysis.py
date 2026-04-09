@@ -15,9 +15,9 @@ logger = logging.getLogger("scriptius.ai")
 
 FAST_ANALYSIS_MODEL = "gemini-2.5-flash-lite"
 FULL_MODEL = "gemini-2.5-flash"
-VALUE_GEN_MODEL = "gemini-2.5-flash"
+VALUE_GEN_MODEL = "gemini-2.5-flash-lite"
 
-FAST_DEBOUNCE_S = 0.25
+FAST_DEBOUNCE_S = 0.1
 FULL_DEBOUNCE_S = 1.5
 
 # ── Qualification questions ──────────────────────────────────────────────────
@@ -40,7 +40,7 @@ FAST_PROMPT = f"""You are analyzing a live sales call transcript. Be FAST and co
 
 Transcript lines are prefixed with [Sales Rep] or [Client].
 
-Do TWO things:
+Do THREE things:
 
 1. **Qualification Tracking** — check these questions:
 {_q_list}
@@ -57,23 +57,24 @@ Do TWO things:
 
    "course" is the course/product being discussed in the sales call.
 
-Reply ONLY in JSON: {{ "qualificationStatus": [{{id, status}}], "clientProfile": {{name, role, company, industry, experience, painPoints, goal, course}} }}"""
+3. **Client Needs & Problems** — extract CONFIRMED client needs/problems/goals. ONLY add if the CLIENT confirmed or admitted the need. If the sales rep just ASKS a question ("do you have problems with X?") — that is NOT a confirmed need. Wait for the client's answer. Write in the SAME LANGUAGE as the conversation (not English). Short phrases, lowercase.
+   - Return an empty list if no NEW confirmed needs found.
+   - Do NOT repeat or paraphrase anything already in the existing list.
+
+Reply ONLY in JSON: {{ "qualificationStatus": [{{id, status}}], "clientProfile": {{name, role, company, industry, experience, painPoints, goal, course}}, "newNeeds": ["need1", "need2"] }}"""
 
 FULL_PROMPT = """You are Scriptius — an AI sales assistant analyzing a live call in real time.
 
 Transcript lines are prefixed with [Sales Rep] or [Client].
 
 Your job:
-1. **Summary for offer** — up to 5 bullet points of things the CLIENT actually said that are useful for closing the deal. Focus on: admitted problems, stated goals, emotional triggers, budget/timeline hints, and anything that shows motivation to buy. Quote or closely paraphrase the client's own words — do NOT summarize abstractly. Each bullet = one specific thing the client said.
-2. **Client Sentiment** — one word (Positive / Neutral / Skeptical / Negative) + one-sentence reason.
-3. **Objection Handling** — if the client raised an objection, give a concise rebuttal.
-4. **Recommended Offer** — suggest the most fitting product/service to pitch. Available courses and pricing:
+1. **Recommended Offer** — suggest the most fitting product/service to pitch based on the client's needs. Available courses and pricing:
    - "Управління командою" — $500
    - "Excel для бізнесу" — $500
-   Always include the price in your recommendation.
+   Always include the price in your recommendation. Explain briefly WHY this course fits the client's situation.
 
-Keep every section SHORT (1-3 sentences max). Write in the same language the conversation is in.
-Reply in valid JSON with keys: summary, sentiment, objectionHandling, recommendedOffer."""
+Write in the same language the conversation is in. Keep it SHORT (2-3 sentences max).
+Reply in valid JSON with keys: recommendedOffer."""
 
 
 def _value_prompt(language: str) -> str:
@@ -178,6 +179,10 @@ class CallAnalyzer:
             self._full_task.cancel()
         self._full_task = asyncio.create_task(self._debounced_full())
 
+        # Fire needs extraction only when CLIENT speaks (not sales rep questions)
+        if speaker == "client":
+            asyncio.create_task(self._extract_needs_immediate(text))
+
     def trigger_fast(self) -> None:
         """Trigger fast analysis (e.g. after clientInfo update)."""
         if self._fast_task and not self._fast_task.done():
@@ -204,6 +209,83 @@ class CallAnalyzer:
             await self._run_full_analysis()
         except asyncio.CancelledError:
             pass
+
+    # ── Immediate needs extraction (no debounce) ──────────────────────────
+
+    async def _extract_needs_immediate(self, new_text: str):
+        """Fire immediately on every final transcript to detect client needs."""
+        if len(self.session.locked_summary) >= 20:
+            return
+        sid = self.session.session_id
+
+        try:
+            existing_lines = ""
+            if self.session.locked_summary:
+                existing_lines = "\nExisting needs (DO NOT repeat):\n" + "\n".join(
+                    f"- {n}" for n in self.session.locked_summary
+                )
+
+            # Get recent conversation for context (last 10 lines)
+            recent = self.session.conversation[-10:]
+            context_lines = "\n".join(f"[{e['speaker']}]: {e['text']}" for e in recent)
+
+            language = detect_conversation_language(self.session.conversation)
+
+            prompt = f"""You analyze a sales call. Extract CONFIRMED client needs/problems/goals.
+
+CRITICAL RULES:
+- ONLY add a need if the CLIENT confirmed or admitted it. The client must have AGREED or STATED the problem themselves.
+- If the SALES REP asks a question like "do you have problems with X?" — that is NOT a confirmed need. Wait for the client's answer.
+- If the sales rep says "so you need X" and the client agrees — THEN it's a confirmed need.
+- Write in {language} (same language as the conversation). Do NOT write in English.
+- Short phrases, lowercase.
+- Return empty list if no NEW confirmed needs found.
+- Do NOT repeat or paraphrase existing needs.{existing_lines}
+
+Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
+
+            response = await asyncio.to_thread(self._client.models.generate_content,
+                model=FAST_ANALYSIS_MODEL,
+                contents=[prompt, f"Recent conversation:\n{context_lines}"],
+                config={"response_mime_type": "application/json", "temperature": 0.1},
+            )
+
+            parsed = _parse_json(response.text)
+            if not parsed:
+                return
+
+            new_needs = parsed.get("newNeeds", [])
+            if not isinstance(new_needs, list) or not new_needs:
+                return
+
+            added = []
+            for need in new_needs:
+                if not need or not isinstance(need, str):
+                    continue
+                need = need.strip().lstrip("•-– ")
+                if not need or len(self.session.locked_summary) >= 20:
+                    continue
+                need_lower = need.lower()
+                is_dup = any(
+                    need_lower in ex.lower() or ex.lower() in need_lower
+                    for ex in self.session.locked_summary
+                )
+                if not is_dup:
+                    self.session.locked_summary.append(need)
+                    added.append(need)
+
+            if added:
+                logger.info(f"[{sid}][AI] Immediate needs: {added}")
+                try:
+                    await self.ws.send_json({
+                        "type": "analysis",
+                        "data": {"summary": list(self.session.locked_summary)},
+                    })
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"[{sid}][AI] Needs extraction error: {e}")
 
     # ── Fast analysis ─────────────────────────────────────────────────────
 
@@ -235,17 +317,23 @@ class CallAnalyzer:
                     for i, q in enumerate(self.session.value_questions)
                 )
                 value_ctx = (
-                    f"\n\n3. **Value Question Tracking** — check these value justification questions:\n"
+                    f"\n\n4. **Value Question Tracking** — check these value justification questions:\n"
                     f"{q_lines}\n\n"
                     "   For each, return status: \"asked\" (rep asked this or similar by meaning), "
                     "\"answered\" (client provided this info without being asked), or null.\n\n"
                     "   Add to JSON response: \"valueStatus\": [{id, status}]"
                 )
 
-            prompt = FAST_PROMPT + prefill_ctx + value_ctx
+            # Pass existing needs so model doesn't duplicate
+            needs_ctx = ""
+            if self.session.locked_summary:
+                needs_lines = "\n".join(f"- {n}" for n in self.session.locked_summary)
+                needs_ctx = f"\n\nExisting client needs (DO NOT repeat these):\n{needs_lines}"
+
+            prompt = FAST_PROMPT + prefill_ctx + value_ctx + needs_ctx
             logger.info(f"[{sid}][AI] Fast analysis triggered (debounce {FAST_DEBOUNCE_S}s)")
 
-            response = self._client.models.generate_content(
+            response = await asyncio.to_thread(self._client.models.generate_content,
                 model=FAST_ANALYSIS_MODEL,
                 contents=[prompt, f"Transcript:\n{transcript}"],
                 config={"response_mime_type": "application/json", "temperature": 0.1},
@@ -282,6 +370,29 @@ class CallAnalyzer:
                 f"qualificationStatus={json.dumps(analysis.get('qualificationStatus', []), ensure_ascii=False)[:200]}, "
                 f"profile fields: {len([v for v in (analysis.get('clientProfile') or {}).values() if v])}"
             )
+
+            # Handle new client needs — add to locked list and send immediately
+            new_needs = analysis.pop("newNeeds", [])
+            if isinstance(new_needs, list) and new_needs and len(self.session.locked_summary) < 20:
+                added = []
+                for need in new_needs:
+                    if not need or not isinstance(need, str):
+                        continue
+                    need = need.strip().lstrip("•-– ")
+                    if not need:
+                        continue
+                    # Skip if duplicate or too similar to existing
+                    need_lower = need.lower()
+                    is_dup = any(
+                        need_lower in existing.lower() or existing.lower() in need_lower
+                        for existing in self.session.locked_summary
+                    )
+                    if not is_dup and len(self.session.locked_summary) < 20:
+                        self.session.locked_summary.append(need)
+                        added.append(need)
+                if added:
+                    logger.info(f"[{sid}][AI] New needs added: {added}")
+                    analysis["summary"] = list(self.session.locked_summary)
 
             # Send to frontend
             try:
@@ -334,13 +445,13 @@ class CallAnalyzer:
 
             lang_ctx = (
                 f"\n\nIMPORTANT: The conversation is in {language}. "
-                f"Write ALL output (summary, sentiment reason, objection handling, offer) in {language}. "
+                f"Write ALL output in {language}. "
                 "Do not switch languages."
             )
 
             logger.info(f"[{sid}][AI] Full analysis triggered (debounce {FULL_DEBOUNCE_S}s)")
 
-            response = self._client.models.generate_content(
+            response = await asyncio.to_thread(self._client.models.generate_content,
                 model=FULL_MODEL,
                 contents=[FULL_PROMPT + lang_ctx, f"Current transcript:\n{transcript}"],
                 config={"response_mime_type": "application/json", "temperature": 0.3},
@@ -348,27 +459,9 @@ class CallAnalyzer:
 
             analysis = _parse_json(response.text)
             if analysis:
-                # Normalize summary → always a list of strings
-                summary = analysis.get("summary")
-                if isinstance(summary, str):
-                    analysis["summary"] = [
-                        s.strip().lstrip("•-– ")
-                        for s in summary.split("\n") if s.strip()
-                    ]
-                elif not isinstance(summary, list):
-                    analysis["summary"] = []
-
-                # Normalize sentiment → always a string
-                sentiment = analysis.get("sentiment")
-                if isinstance(sentiment, dict):
-                    label = sentiment.get("label", "Neutral")
-                    reason = sentiment.get("reason", "")
-                    analysis["sentiment"] = f"{label} — {reason}" if reason else label
-
                 logger.info(
                     f"[{sid}][AI] Full result: "
-                    f"sentiment={analysis.get('sentiment', 'N/A')}, "
-                    f"summary={str(analysis.get('summary', ''))[:100]}"
+                    f"offer={str(analysis.get('recommendedOffer', ''))[:100]}"
                 )
                 try:
                     await self.ws.send_json({"type": "analysis", "data": analysis})
@@ -405,7 +498,7 @@ class CallAnalyzer:
                 )
                 previous_ctx = f"\n\nPrevious questions (DO NOT repeat):\n{prev_lines}"
 
-            response = self._client.models.generate_content(
+            response = await asyncio.to_thread(self._client.models.generate_content,
                 model=VALUE_GEN_MODEL,
                 contents=[
                     prompt_text + previous_ctx,

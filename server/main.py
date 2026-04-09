@@ -6,9 +6,11 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from audio_ws import router as audio_ws_router
+from app.hubspot import router as hubspot_router
 
 app = FastAPI(title="Scriptius STT Server")
 app.include_router(audio_ws_router)
+app.include_router(hubspot_router)
 
 @app.get("/health")
 def health():

@@ -23,7 +23,7 @@ STT_ENGINE = os.getenv("STT_ENGINE", "chirp_v2")  # "chirp_v2" or "latest_long_v
 
 RECONNECT_SECONDS = 270
 OVERLAP_MAX_BYTES = 8 * 32000  # ~8 seconds of 16kHz 16-bit mono
-BUFFER_TARGET = 1600  # bytes before sending to STT
+BUFFER_TARGET = 640   # bytes before sending to STT (~20ms at 16kHz 16-bit mono)
 
 # ── VAD config ────────────────────────────────────────────────────────────────
 VAD_FRAME_BYTES = 640          # 20ms frame at 16kHz 16-bit mono
@@ -211,7 +211,7 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
                     return
 
                 try:
-                    chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.1)
+                    chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.02)
                 except asyncio.TimeoutError:
                     # Send silence keepalive to prevent Google audio timeout
                     now = asyncio.get_running_loop().time()
@@ -232,11 +232,9 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
                     removed = overlap_chunks.popleft()
                     overlap_size -= len(removed)
 
-                buf.extend(chunk)
-                if len(buf) >= BUFFER_TARGET:
-                    yield cloud_speech.StreamingRecognizeRequest(audio=bytes(buf))
-                    buf.clear()
-                    last_keepalive = asyncio.get_running_loop().time()
+                # Send immediately — no buffering (lowest latency)
+                yield cloud_speech.StreamingRecognizeRequest(audio=chunk)
+                last_keepalive = asyncio.get_running_loop().time()
 
         try:
             logger.info(f"[{session_id}][{speaker}] STT v2 chirp stream starting")
@@ -398,7 +396,7 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
                     return
 
                 try:
-                    chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.1)
+                    chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.02)
                 except asyncio.TimeoutError:
                     # Send silence keepalive to prevent Google audio timeout
                     now = asyncio.get_running_loop().time()
@@ -419,11 +417,9 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
                     removed = overlap_chunks.popleft()
                     overlap_size -= len(removed)
 
-                buf.extend(chunk)
-                if len(buf) >= BUFFER_TARGET:
-                    yield speech_v1.StreamingRecognizeRequest(audio_content=bytes(buf))
-                    buf.clear()
-                    last_keepalive = asyncio.get_running_loop().time()
+                # Send immediately — no buffering (lowest latency)
+                yield speech_v1.StreamingRecognizeRequest(audio_content=chunk)
+                last_keepalive = asyncio.get_running_loop().time()
 
         try:
             logger.info(f"[{session_id}][{speaker}] STT v1 latest_long stream starting")
@@ -571,12 +567,19 @@ async def audio_ws(websocket: WebSocket):
     stream_fn = _stream_stt_v2 if STT_ENGINE == "chirp_v2" else _stream_stt_v1
     logger.info(f"[{session_id}] Using STT engine: {STT_ENGINE}")
 
-    client_task = asyncio.create_task(
-        stream_fn(client_queue, "client", websocket, credentials, session_id, callbacks)
-    )
-    sales_task = asyncio.create_task(
-        stream_fn(sales_queue, "sales", websocket, credentials, session_id, callbacks)
-    )
+    # Lazy-start STT streams — only when first audio arrives for that channel
+    stt_tasks: dict[int, asyncio.Task] = {}  # track -> task
+    queues = {0: client_queue, 1: sales_queue}
+    speakers = {0: "client", 1: "sales"}
+
+    def ensure_stt(track: int):
+        if track not in stt_tasks:
+            q = queues[track]
+            sp = speakers[track]
+            stt_tasks[track] = asyncio.create_task(
+                stream_fn(q, sp, websocket, credentials, session_id, callbacks)
+            )
+            logger.info(f"[{session_id}][{sp}] STT stream started (first audio received)")
 
     try:
         while True:
@@ -590,8 +593,11 @@ async def audio_ws(websocket: WebSocket):
                     track = raw[0]  # 0x00 = client, 0x01 = sales
                     pcm = raw[1:]
 
+                    # Start STT on first audio for this channel
+                    ensure_stt(track)
+
                     # All audio direct to STT (no gating)
-                    target_queue = client_queue if track == 0 else sales_queue
+                    target_queue = queues.get(track, sales_queue)
                     try:
                         target_queue.put_nowait(pcm)
                     except asyncio.QueueFull:
@@ -620,6 +626,30 @@ async def audio_ws(websocket: WebSocket):
                     msg_type = data.get("type")
                     if msg_type == "start_call":
                         logger.info(f"[{session_id}] Call started, course_id={data.get('course_id')}")
+                        # Check for HubSpot prefill data
+                        from app.hubspot import get_pending_prefill
+                        prefill = get_pending_prefill()
+                        if prefill:
+                            # Remove internal fields (prefixed with _)
+                            client_fields = {k: v for k, v in prefill.items() if not k.startswith("_") and v}
+                            if client_fields:
+                                session.update_profile(client_fields)
+                                logger.info(f"[{session_id}] HubSpot prefill applied: {list(client_fields.keys())}")
+                                try:
+                                    await websocket.send_json({
+                                        "type": "analysis",
+                                        "data": {"clientProfile": session.client_profile},
+                                    })
+                                    # Also send prefill metadata (phone, deal name)
+                                    meta = {k: v for k, v in prefill.items() if k.startswith("_") and v}
+                                    if meta:
+                                        await websocket.send_json({
+                                            "type": "hubspotMeta",
+                                            "data": meta,
+                                        })
+                                except Exception:
+                                    pass
+                                analyzer.trigger_fast()
                     elif msg_type == "end_call":
                         logger.info(f"[{session_id}] Call ended by client")
                         break
@@ -653,12 +683,9 @@ async def audio_ws(websocket: WebSocket):
         if callbacks.on_call_end:
             callbacks.on_call_end(session_id)
 
-        # Signal STT tasks to stop
-        await client_queue.put(None)
-        await sales_queue.put(None)
-
-        # Wait for STT tasks to finish
-        for task in (client_task, sales_task):
+        # Signal STT tasks to stop and wait
+        for track, task in stt_tasks.items():
+            await queues[track].put(None)
             task.cancel()
             try:
                 await task

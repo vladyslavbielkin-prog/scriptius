@@ -268,8 +268,9 @@ body.transcript-open .calls-layout {
 
 .summary-card .card-title {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: none;
 }
 
 .summary-card, .offer-card {
@@ -283,6 +284,29 @@ body.transcript-open .calls-layout {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  position: sticky;
+  top: 16px;
+  align-self: flex-start;
+  height: calc(100vh - 90px);
+}
+
+.sidebar-left .profile-card {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sidebar-left .notes-card {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-left .notes-body {
+  flex: 1;
+  overflow-y: auto;
 }
 
 /* ── Profile Card ──────────────────────────────────────────── */
@@ -348,6 +372,40 @@ body.transcript-open .calls-layout {
 }
 
 .course-select:focus { border-color: var(--green); }
+
+.hubspot-input-row {
+  display: flex;
+  gap: 4px;
+}
+
+.hubspot-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 11px;
+  background: var(--card);
+  color: var(--text-primary);
+}
+
+.hubspot-input:focus { border-color: var(--green); outline: none; }
+
+.hubspot-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--green);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hubspot-btn:hover { opacity: 0.9; }
+.hubspot-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.hubspot-btn.loading { background: var(--text-muted); }
+.hubspot-btn.success { background: var(--green-check); }
+.hubspot-btn.error { background: var(--red-accent); }
 
 .profile-grid {
   display: grid;
@@ -625,6 +683,22 @@ body.transcript-open .calls-layout {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  position: sticky;
+  top: 16px;
+  align-self: flex-start;
+  height: calc(100vh - 90px);
+}
+
+.sidebar-right .summary-card {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sidebar-right .offer-card {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* ── Summary Card ──────────────────────────────────────────── */

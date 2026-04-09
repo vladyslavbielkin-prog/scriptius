@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=2" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
 
@@ -64,6 +64,14 @@
           </div>
         </div>
 
+        <div class="profile-field hubspot-field">
+          <label class="field-label">HubSpot Deal</label>
+          <div class="hubspot-input-row">
+            <input id="hubspotInput" type="text" class="hubspot-input" placeholder="Paste deal URL or ID..." />
+            <button id="hubspotLoad" class="hubspot-btn" title="Load from HubSpot">&#8599;</button>
+          </div>
+        </div>
+
         <div class="profile-field course-field">
           <label class="field-label">Course</label>
           <select id="courseSelect" class="course-select">
@@ -90,11 +98,11 @@
             <span class="field-label">Industry</span>
             <span id="statIndustry" class="field-value">&mdash;</span>
           </div>
-          <div class="profile-field full-width">
+          <div class="profile-field">
             <span class="field-label">Pain Points</span>
             <span id="fieldPainPoints" class="field-value">&mdash;</span>
           </div>
-          <div class="profile-field full-width">
+          <div class="profile-field">
             <span class="field-label">Goal</span>
             <span id="fieldGoal" class="field-value">&mdash;</span>
           </div>
@@ -172,18 +180,10 @@
     <!-- Right Sidebar: Summary + Offer -->
     <aside class="sidebar-right">
       <div class="card summary-card">
-        <h3 class="card-title">Conversation Summary</h3>
+        <h3 class="card-title">Client Needs & Problems</h3>
         <ul id="summaryList" class="summary-list">
           <li class="waiting-text">Waiting for conversation...</li>
         </ul>
-        <div id="sentimentRow" class="sentiment-row" style="display:none">
-          <span class="row-label">Sentiment</span>
-          <span id="sentimentBadge" class="sentiment-badge"></span>
-        </div>
-        <div id="objectionRow" class="objection-row" style="display:none">
-          <span class="row-label">Objection</span>
-          <span id="objectionText" class="objection-text"></span>
-        </div>
       </div>
 
       <div class="card offer-card">
@@ -321,6 +321,6 @@
   <div id="micValue">0</div>
 </div>
 
-<script src="app.js?v=2"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

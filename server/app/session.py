@@ -21,6 +21,7 @@ class CallSession:
         self.value_batch_generated: int = 0
         self.call_start_time: float = time.time()
         self.notes: list = []
+        self.locked_summary: list[str] = []
 
     def add_transcript(self, speaker: str, text: str) -> None:
         mapped = SPEAKER_MAP.get(speaker, speaker)

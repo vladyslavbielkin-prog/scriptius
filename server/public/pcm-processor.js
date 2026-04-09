@@ -2,7 +2,7 @@
 class PCMProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this._buffer = new Float32Array(1600); // 100ms at 16kHz
+    this._buffer = new Float32Array(480); // 30ms at 16kHz
     this._pos = 0;
   }
 
@@ -15,15 +15,15 @@ class PCMProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < samples.length; i++) {
       this._buffer[this._pos++] = samples[i];
 
-      if (this._pos >= 1600) {
+      if (this._pos >= 480) {
         // Convert Float32 → Int16
-        const int16 = new Int16Array(1600);
-        for (let j = 0; j < 1600; j++) {
+        const int16 = new Int16Array(480);
+        for (let j = 0; j < 480; j++) {
           const s = Math.max(-1, Math.min(1, this._buffer[j]));
           int16[j] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
         this.port.postMessage(int16.buffer, [int16.buffer]);
-        this._buffer = new Float32Array(1600);
+        this._buffer = new Float32Array(480);
         this._pos = 0;
       }
     }

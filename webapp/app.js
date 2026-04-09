@@ -44,7 +44,7 @@ const SPEAKER_LABELS = { client: 'Client', sales: 'Sales Rep' };
 let backendUtteranceCounters = { client: 0, sales: 0 };
 let backendActiveUids = {};
 let finalizeTimers = {};
-const FINALIZE_DELAY = 500;
+const FINALIZE_DELAY = 150;
 
 // VAD state: true = speaker is currently talking
 let vadState = { client: false, sales: false };
@@ -141,38 +141,16 @@ function connectBackend() {
 
     let msg;
     try { msg = JSON.parse(event.data); } catch (e) { return; }
-    console.log('[Backend-Msg]', JSON.stringify(msg).substring(0, 300));
+    if (msg.type !== 'transcript' && msg.type !== 'vad_event') {
+      console.log('[Backend-Msg]', JSON.stringify(msg).substring(0, 300));
+    }
 
     // ── VAD events ──
     if (msg.type === 'vad_event') {
       const speaker = msg.speaker;
       if (msg.event === 'speech_start') vadState[speaker] = true;
       if (msg.event === 'speech_end') vadState[speaker] = false;
-
-      if (msg.event === 'speech_start' && !backendActiveUids[speaker]) {
-        backendActiveUids[speaker] = 'be_' + speaker + '_' + (backendUtteranceCounters[speaker] || 0);
-        handleTranscript(speaker, '...', true, backendActiveUids[speaker]);
-
-        // Barge-in: force-finalize other speaker's active card
-        const otherSpeaker = speaker === 'client' ? 'sales' : 'client';
-        if (backendActiveUids[otherSpeaker]) {
-          if (finalizeTimers[otherSpeaker]) {
-            clearTimeout(finalizeTimers[otherSpeaker]);
-            finalizeTimers[otherSpeaker] = null;
-          }
-          finalizeActiveCard(otherSpeaker);
-        }
-      }
-
-      if (msg.event === 'speech_end' && backendActiveUids[speaker]) {
-        const uid = backendActiveUids[speaker];
-        const entry = utteranceEntries[String(uid)];
-        if (entry) {
-          entry.classList.remove('interim');
-          entry.classList.add('processing');
-        }
-        scheduleFinalize(speaker);
-      }
+      // No placeholder cards — let transcript events drive the UI directly
     }
 
     // ── Transcript ──
@@ -183,23 +161,12 @@ function connectBackend() {
       }
       const uid = backendActiveUids[speaker];
 
-      if (!utteranceEntries[String(uid)] && !msg.interim) {
-        const estimatedDuration = (msg.text.length / 15) * 1000;
-        if (!window._chirpEstimatedStart) window._chirpEstimatedStart = {};
-        window._chirpEstimatedStart[String(uid)] = Date.now() - estimatedDuration;
-      }
-
-      // Update card text — keep mutable (don't reset uid)
+      // Update card text immediately — no delays
       handleTranscript(speaker, msg.text, true, uid);
 
-      // Chirp FINAL → set finalizing state + schedule delayed finalization
+      // FINAL → finalize immediately (no timer)
       if (!msg.interim) {
-        const entry = utteranceEntries[String(uid)];
-        if (entry) {
-          entry.classList.remove('interim', 'processing');
-          entry.classList.add('finalizing');
-        }
-        scheduleFinalize(speaker);
+        finalizeActiveCard(speaker);
       }
     }
 
@@ -285,12 +252,12 @@ function stopMicCapture() {
 
 // ── Finalize Helpers ─────────────────────────────────────────
 
-function scheduleFinalize(speaker) {
+function scheduleFinalize(speaker, delay) {
   if (finalizeTimers[speaker]) clearTimeout(finalizeTimers[speaker]);
   finalizeTimers[speaker] = setTimeout(() => {
     finalizeTimers[speaker] = null;
     finalizeActiveCard(speaker);
-  }, FINALIZE_DELAY);
+  }, delay || FINALIZE_DELAY);
 }
 
 function finalizeActiveCard(speaker) {
@@ -388,13 +355,8 @@ function handleTranscript(speaker, text, interim, uid) {
   const key = String(uid);
   let existing = utteranceEntries[key];
 
-  // Immutability guard: if entry lost all mutable classes, it's finalized — don't mutate
-  if (existing && !existing.classList.contains('interim') && !existing.classList.contains('processing') && !existing.classList.contains('finalizing')) {
-    delete utteranceEntries[key];
-    existing = undefined;
-  }
-
   if (existing) {
+    // Update text in-place immediately
     existing.querySelector('.transcript-text').textContent = text;
     if (!interim) {
       existing.classList.remove('interim', 'processing');
@@ -413,25 +375,7 @@ function handleTranscript(speaker, text, interim, uid) {
     }
 
     const entry = createTranscriptEntry(speaker, text, interim);
-    const estimatedStart = window._chirpEstimatedStart?.[key];
-    entry.dataset.speechStartTime = String(estimatedStart || Date.now());
-    if (estimatedStart) delete window._chirpEstimatedStart[key];
-
-    const allEntries = transcriptList.querySelectorAll('.transcript-entry');
-    let insertBefore = null;
-    for (let i = allEntries.length - 1; i >= 0; i--) {
-      const entryTime = Number(allEntries[i].dataset.speechStartTime || 0);
-      if (entryTime > Number(entry.dataset.speechStartTime)) {
-        insertBefore = allEntries[i];
-      } else {
-        break;
-      }
-    }
-    if (insertBefore) {
-      transcriptList.insertBefore(entry, insertBefore);
-    } else {
-      transcriptList.appendChild(entry);
-    }
+    transcriptList.appendChild(entry);
 
     if (interim) {
       utteranceEntries[key] = entry;
@@ -953,12 +897,86 @@ function initCourseSelector() {
   });
 }
 
+// ── HubSpot Deal Loader ────────────────────────────────────
+
+function initHubspotLoader() {
+  const input = document.getElementById('hubspotInput');
+  const btn = document.getElementById('hubspotLoad');
+  if (!input || !btn) return;
+
+  function extractDealId(val) {
+    val = val.trim();
+    // URL format: .../deal/DEAL_ID or .../record/0-3/DEAL_ID/...
+    const urlMatch = val.match(/(?:deal|record\/0-3)\/(\d+)/);
+    if (urlMatch) return urlMatch[1];
+    // Plain number
+    if (/^\d+$/.test(val)) return val;
+    return null;
+  }
+
+  async function loadDeal() {
+    const dealId = extractDealId(input.value);
+    if (!dealId) {
+      btn.textContent = '!';
+      btn.className = 'hubspot-btn error';
+      setTimeout(() => { btn.textContent = '\u2197'; btn.className = 'hubspot-btn'; }, 1500);
+      return;
+    }
+
+    btn.textContent = '...';
+    btn.className = 'hubspot-btn loading';
+    btn.disabled = true;
+
+    try {
+      const resp = await fetch(`/api/hubspot/fetch-deal?deal_id=${dealId}`);
+      const data = await resp.json();
+
+      if (data.status === 'ok' && data.clientProfile) {
+        // Update client card immediately
+        const p = data.clientProfile;
+        if (p.name) {
+          document.getElementById('clientName').textContent = p.name;
+          document.getElementById('avatar').textContent = p.name.charAt(0).toUpperCase();
+        }
+        if (p.role) {
+          document.getElementById('clientRole').textContent = p.role;
+          document.getElementById('fieldPosition').textContent = p.role;
+        }
+        if (p.company) document.getElementById('statCompany').textContent = p.company;
+        if (p.industry) document.getElementById('statIndustry').textContent = p.industry;
+        if (p.experience) document.getElementById('statExperience').textContent = p.experience;
+
+        btn.textContent = '\u2713';
+        btn.className = 'hubspot-btn success';
+      } else {
+        btn.textContent = '!';
+        btn.className = 'hubspot-btn error';
+      }
+
+      setTimeout(() => { btn.textContent = '\u2197'; btn.className = 'hubspot-btn'; }, 2000);
+    } catch (e) {
+      console.error('[HubSpot] Load error:', e);
+      btn.textContent = '!';
+      btn.className = 'hubspot-btn error';
+      setTimeout(() => { btn.textContent = '\u2197'; btn.className = 'hubspot-btn'; }, 1500);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  btn.addEventListener('click', loadDeal);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadDeal();
+  });
+}
+
 // ── Init ────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
   initRouter();
   initCheckboxListeners();
   initCourseSelector();
+  initHubspotLoader();
   updateSectionStates();
 
   // Transcript panel toggle
