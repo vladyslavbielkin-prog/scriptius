@@ -347,6 +347,117 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
     logger.info(f"[{session_id}][{speaker}] STT stream ended")
 
 
+# ── SILENT STT v1 stream (for AI feeds in dual-engine mode) ──────────────────
+
+async def _stream_stt_v1_silent(audio_queue: asyncio.Queue, speaker: str,
+                                 credentials, session_id: str,
+                                 callbacks: EventCallbacks = None, language: str = "uk-UA"):
+    """Lightweight v1 latest_long stream that ONLY feeds AI callbacks (no websocket display).
+    Used as a shadow stream for chirp_v2 to provide rapid interim text for AI analysis."""
+    from google.cloud import speech as speech_v1
+
+    client = speech_v1.SpeechAsyncClient(credentials=credentials)
+
+    if language == "en-US":
+        primary_lang, alt_langs = "en-US", ["uk-UA", "ru-RU"]
+    else:
+        primary_lang, alt_langs = language, ["en-US"]
+
+    streaming_config = speech_v1.StreamingRecognitionConfig(
+        config=speech_v1.RecognitionConfig(
+            encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000,
+            language_code=primary_lang,
+            alternative_language_codes=alt_langs,
+            model="latest_long",
+            use_enhanced=True,
+            enable_automatic_punctuation=True,
+        ),
+        interim_results=True,
+    )
+
+    call_ended = False
+    reconnect_count = 0
+
+    while not call_ended:
+        need_reconnect = False
+        session_start = asyncio.get_running_loop().time()
+
+        async def audio_gen(t0=session_start):
+            nonlocal call_ended, need_reconnect
+            yield speech_v1.StreamingRecognizeRequest(streaming_config=streaming_config)
+            last_keepalive = asyncio.get_running_loop().time()
+
+            while True:
+                elapsed = asyncio.get_running_loop().time() - t0
+                if elapsed >= RECONNECT_SECONDS:
+                    need_reconnect = True
+                    return
+                try:
+                    chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.02)
+                except asyncio.TimeoutError:
+                    now = asyncio.get_running_loop().time()
+                    if now - last_keepalive >= KEEPALIVE_INTERVAL:
+                        yield speech_v1.StreamingRecognizeRequest(audio_content=SILENCE_FRAME)
+                        last_keepalive = now
+                    continue
+                if chunk is None:
+                    call_ended = True
+                    return
+                yield speech_v1.StreamingRecognizeRequest(audio_content=chunk)
+                last_keepalive = asyncio.get_running_loop().time()
+
+        try:
+            logger.info(f"[{session_id}][{speaker}] SHADOW v1 stream starting")
+            async for response in await client.streaming_recognize(requests=audio_gen()):
+                parts = []
+                has_final = False
+                for result in response.results:
+                    if not result.alternatives:
+                        continue
+                    t = result.alternatives[0].transcript.strip()
+                    if t:
+                        parts.append(t)
+                    if result.is_final:
+                        has_final = True
+                if not parts:
+                    continue
+                text = " ".join(parts)
+                is_final = has_final
+                # Only feed AI callbacks — no websocket display
+                if callbacks:
+                    if is_final:
+                        if callbacks.on_partial:
+                            callbacks.on_partial(speaker, "")
+                        if callbacks.on_transcript:
+                            callbacks.on_transcript(speaker, text, True)
+                    else:
+                        if callbacks.on_partial:
+                            callbacks.on_partial(speaker, text)
+
+        except Exception as e:
+            if call_ended:
+                break
+            err_str = str(e)
+            if "Audio Timeout" in err_str or ("400" in err_str and "timeout" in err_str.lower()):
+                need_reconnect = True
+            elif "499" in err_str or "cancelled" in err_str.lower():
+                call_ended = True
+                break
+            else:
+                logger.error(f"[{session_id}][{speaker}] SHADOW v1 error: {err_str}")
+                need_reconnect = True
+            await asyncio.sleep(0.3)
+
+        if need_reconnect:
+            reconnect_count += 1
+            if reconnect_count > MAX_RECONNECTS:
+                break
+            await asyncio.sleep(min(0.5 * reconnect_count, 5.0))
+
+    logger.info(f"[{session_id}][{speaker}] SHADOW v1 stream ended")
+
+
 # ── STT streaming (v1 latest_long fallback) ───────────────────────────────────
 
 async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
@@ -880,14 +991,14 @@ async def audio_ws(websocket: WebSocket):
     def _on_transcript(speaker, text, is_final):
         if is_final:
             session.add_transcript(speaker, text)
-            analyzer.on_new_transcript(speaker, text)
+            analyzer.on_new_transcript(speaker, text, is_final=True)
 
     def _on_partial(speaker, text):
         # Update pending partial — included in transcript for AI
         session.pending_partial[speaker] = text
-        # Trigger fast analysis with current partial text (debounced)
+        # Trigger reflex with current partial text (qualification only, no profile/needs commit)
         if text:
-            analyzer.on_new_transcript(speaker, text)
+            analyzer.on_new_transcript(speaker, text, is_final=False)
 
     def _on_vad_event(speaker, event):
         pass  # VAD events already logged by SpeechDetector
@@ -936,8 +1047,10 @@ async def audio_ws(websocket: WebSocket):
             return _stream_stt_v1
 
     # Lazy-start STT streams — only when first audio arrives for that channel
-    stt_tasks: dict[int, asyncio.Task] = {}  # track -> task
+    stt_tasks: dict = {}  # (track, "main"/"shadow") -> task
     queues = {0: client_queue, 1: sales_queue}
+    # Shadow queues for AI-feeding v1 stream when chirp_v2 is selected
+    shadow_queues: dict[int, asyncio.Queue] = {}
     speakers = {0: "client", 1: "sales"}
 
     def get_stt_language():
@@ -955,15 +1068,33 @@ async def audio_ws(websocket: WebSocket):
         return country_lang.get(getattr(session, "country", "UA"), "uk-UA")
 
     def ensure_stt(track: int):
-        if track not in stt_tasks:
+        if (track, "main") not in stt_tasks:
             q = queues[track]
             sp = speakers[track]
             lang = get_stt_language()
             stream_fn = get_stream_fn()
-            stt_tasks[track] = asyncio.create_task(
+            eng = getattr(session, "stt_engine", STT_ENGINE)
+            stt_tasks[(track, "main")] = asyncio.create_task(
                 stream_fn(q, sp, websocket, credentials, session_id, callbacks, language=lang)
             )
-            logger.info(f"[{session_id}][{sp}] STT stream started (lang={lang}, first audio received)")
+            logger.info(f"[{session_id}][{sp}] STT stream started (engine={eng}, lang={lang})")
+
+            # ── SHADOW STREAM: when chirp_v2 selected, also run v1 silently for fast AI feeds ──
+            if eng == "chirp_v2":
+                shadow_q: asyncio.Queue = asyncio.Queue(maxsize=500)
+                shadow_queues[track] = shadow_q
+                # Shadow callbacks: only feed AI, don't send transcripts to display websocket
+                shadow_callbacks = EventCallbacks(
+                    on_transcript=callbacks.on_transcript,
+                    on_partial=callbacks.on_partial,
+                    on_vad_event=None,
+                    on_call_start=None,
+                    on_call_end=None,
+                )
+                stt_tasks[(track, "shadow")] = asyncio.create_task(
+                    _stream_stt_v1_silent(shadow_q, sp, credentials, session_id, shadow_callbacks, language=lang)
+                )
+                logger.info(f"[{session_id}][{sp}] Shadow v1 stream started (silent, AI-only)")
 
     try:
         while True:
@@ -986,6 +1117,14 @@ async def audio_ws(websocket: WebSocket):
                         target_queue.put_nowait(pcm)
                     except asyncio.QueueFull:
                         pass
+
+                    # Also feed shadow queue if it exists (dual-engine mode for chirp_v2)
+                    shadow_q = shadow_queues.get(track)
+                    if shadow_q is not None:
+                        try:
+                            shadow_q.put_nowait(pcm)
+                        except asyncio.QueueFull:
+                            pass
 
                     # VAD in parallel — events only
                     detector = client_detector if track == 0 else sales_detector
@@ -1080,9 +1219,15 @@ async def audio_ws(websocket: WebSocket):
         if callbacks.on_call_end:
             callbacks.on_call_end(session_id)
 
-        # Signal STT tasks to stop and wait
-        for track, task in stt_tasks.items():
-            await queues[track].put(None)
+        # Signal main + shadow STT tasks to stop and wait
+        for key, task in stt_tasks.items():
+            track, kind = key
+            q = shadow_queues.get(track) if kind == "shadow" else queues.get(track)
+            if q is not None:
+                try:
+                    await q.put(None)
+                except Exception:
+                    pass
             task.cancel()
             try:
                 await task

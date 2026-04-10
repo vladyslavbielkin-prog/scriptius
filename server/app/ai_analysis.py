@@ -72,7 +72,7 @@ def build_qualification_questions(profile: dict) -> list[dict]:
             "text": text,
         })
 
-    # Add questions for missing fields
+    # Add questions for missing fields (leave 1 slot for q-pain at the end)
     missing_qs = {
         "role": {"id": "q-role", "text": "Яка ваша посада та в якій індустрії ви працюєте?"},
         "experience": {"id": "q-experience", "text": "Скільки років ви уже працюєте у цій сфері?"},
@@ -80,15 +80,14 @@ def build_qualification_questions(profile: dict) -> list[dict]:
         "industry": {"id": "q-industry", "text": "В якій індустрії ви працюєте?"},
     }
     for field, q in missing_qs.items():
-        if field not in known and len(questions) < 4:
+        if field not in known and len(questions) < 3:  # Reserve slot 4 for q-pain
             questions.append(q)
 
-    # Always add pain question if room
-    if len(questions) < 4:
-        questions.append({
-            "id": "q-pain",
-            "text": "Скажіть, а чим зацікавив вас наш курс? Чим він міг би бути вам корисним?",
-        })
+    # ALWAYS add pain question — it's critical
+    questions.append({
+        "id": "q-pain",
+        "text": "Скажіть, а чим зацікавив вас наш курс? Чим він міг би бути вам корисним?",
+    })
 
     return questions[:4]
 
@@ -146,46 +145,94 @@ Reply in valid JSON with keys: recommendedOffer."""
 
 
 def _value_prompt(language: str) -> str:
-    return f"""You are a world-class sales consultant who deeply understands business operations. Based on the client profile and conversation context below, generate exactly 5 value justification questions in {language}.
+    return f"""You are a world-class sales consultant with 20+ years of experience and deep expertise across industries. You're generating 5 highly specialized discovery questions in {language} for a sales rep to ask their client.
 
-Your goal: ask questions that make the client THINK. Questions that show you understand their world better than most people they talk to. The client should feel "wow, that's a great question" — not "that's a generic sales pitch."
+You have access to the client's profile (role, industry, company, experience) AND their stated problems/goals. Use ALL of this to craft questions that ONLY a true expert in their field could ask.
 
-Strategic intent (internal — never say these to the client):
-- Surface the hidden cost of their current problems (time, money, team morale, missed opportunities)
-- Make them feel the GAP between where they are and where they could be
-- Create urgency by connecting their problem to real consequences they haven't fully considered
+CORE PRINCIPLE: Each question should make the client think "this person REALLY understands my world." The client should feel like they're talking to an industry expert, not a salesperson.
 
-STYLE:
-- SHORT and CLEAR — one thought per question, under 15 words
-- Use simple everyday words, NOT corporate jargon (no "ROI", "optimization", "synergy", "KPI", "ефективність", "оптимізація", "стратегічний")
-- But the THINKING behind the question must be expert-level — reference specific realities of their industry, role, or situation
-- Ask about concrete things: numbers, time, people, specific situations — not abstract concepts
+EXPERT THINKING — what makes questions specialized:
 
-SPECIALIZATION — this is what makes the questions expert:
-- Use details from their industry, role, and pain points to ask questions only a knowledgeable person would ask
-- Reference real scenarios that happen in their type of work (e.g., for a marketing manager: "How many hours does your team spend on reports that nobody reads?")
-- Ask about second-order effects they might not have thought about (e.g., how their problem affects their team, their clients, their career growth)
-- Each question should feel like it was written specifically for THIS person, not a template
+1. **Industry-specific language and scenarios**: Reference real pain points unique to their industry. A marketer in fintech has different problems than a marketer in retail. Show you know the difference.
 
-Language:
-- Write in {language}
-- Use conversational, everyday vocabulary in that language
+2. **Role-specific second-order effects**: Connect their stated problem to consequences they haven't fully thought through yet:
+   - For managers: how the problem affects team morale, retention, your reputation with leadership
+   - For individual contributors: how it affects career progression, recognition, daily stress
+   - For executives: how it affects board reporting, strategic initiatives, investor confidence
+
+3. **Quantification questions**: Force them to think in numbers/time/money:
+   - "How many hours per week does your team spend fixing X?"
+   - "When was the last time this problem caused a missed deadline?"
+   - "How much of your monthly budget goes to working around this?"
+
+4. **Reveal hidden costs**: Surface costs they're paying but haven't recognized:
+   - Lost opportunities they didn't pursue because of this problem
+   - Top performers who left because of related frustrations
+   - Strategic decisions delayed because data isn't reliable
+
+5. **Reference experience level**: Junior people care about different things than seniors. Ask accordingly.
+
+STRUCTURE OF EACH QUESTION:
+- Connect to a SPECIFIC detail from their profile (industry/role/pain point/goal)
+- Force them to recall a CONCRETE situation, number, or moment
+- Reveal a consequence they haven't fully processed
+
+STYLE RULES:
+- SHORT — under 18 words per question
+- Simple conversational language in {language}
+- NO jargon ("ROI", "synergy", "optimization", "KPI", "leverage", "scalability")
+- NO yes/no questions — ask "how", "when", "what happens when"
+- DON'T be generic. Each question must reference something specific from THEIR profile
+
+TONE:
+- Curious, not pushy
+- Like you're trying to understand their world, not sell them something
+- Respectful of their expertise
+
+LANGUAGE: Write in {language} using natural conversational vocabulary.
 
 Reply ONLY in JSON: {{ "valueQuestions": ["question1", "question2", "question3", "question4", "question5"] }}"""
 
 
 def _value_prompt_batch2(language: str) -> str:
-    return f"""You are a world-class sales consultant. The rep already asked the first 5 value questions. Now generate 5 DEEPER follow-up questions in {language} that build on what the client has revealed.
+    return f"""You are a world-class sales consultant. The rep already asked the first 5 discovery questions. Now generate 5 DEEPER specialized follow-ups in {language} that take the conversation to the next level.
 
-These questions should go to the NEXT level — now that you know more about the client, ask things that:
-- Quantify the problem: "How many hours/people/dollars does this cost you per month?"
-- Expose what they've already tried and why it failed
-- Connect their problem to people around them (team, boss, clients)
-- Make them imagine life AFTER the problem is solved — in specific, concrete terms
-- Reveal the real reason they haven't fixed this yet (budget? time? don't know how?)
+You now know MORE about the client because they've answered the first round. Use that new info to dig deeper.
+
+WHAT TO PROBE FOR (each question should target ONE):
+
+1. **Quantify the cost**: Force them to put a number on the problem
+   - Money: "How much does X cost you each month?"
+   - Time: "How many hours does your team lose to X per week?"
+   - People: "How many people on your team are affected?"
+
+2. **Past failures**: Expose what they've tried that didn't work
+   - "What did you try last time to fix this?"
+   - "Why didn't [previous solution] work for you?"
+   - This reveals barriers and builds your case
+
+3. **Stakeholder impact**: Connect their pain to people around them
+   - Their team's frustration
+   - Their boss's expectations
+   - Their clients' experience
+   - Their family/personal life
+
+4. **Imagine the solution**: Make them visualize success specifically
+   - "If this problem was solved tomorrow, what would change first?"
+   - "What would you do with that extra time/money?"
+   - This creates emotional commitment
+
+5. **Reveal the real blocker**: Why haven't they fixed this yet?
+   - Budget concerns?
+   - Lack of skills/knowledge?
+   - Internal politics?
+   - Don't know where to start?
+   - Failed past attempts?
+
+CRITICAL: Don't repeat what was already asked. Reference what the client said in their answers and dig deeper into those specific things.
 
 STYLE:
-- SHORT and CLEAR — under 15 words per question
+- SHORT — under 18 words per question
 - Simple everyday words, NO jargon
 - But expert thinking — reference what the client actually said, ask about specifics of THEIR situation
 - Each question should feel like a natural follow-up to the conversation, not a new topic
@@ -240,6 +287,11 @@ class CallAnalyzer:
         # Build dynamic qualification questions based on prefilled profile
         self._qual_questions = build_qualification_questions(session.client_profile)
         self._fast_prompt = build_fast_prompt(self._qual_questions)
+        self._fast_pending = False  # Track if a new fast run is needed after current finishes
+        self._full_pending = False
+        self._validator_running = False
+        # Per-speaker debouncing for reflex on partials (waits for natural pause)
+        self._reflex_partial_tasks: dict[str, asyncio.Task] = {}
 
     def update_qualification_questions(self):
         """Rebuild qualification questions after profile update (e.g. HubSpot prefill)."""
@@ -248,18 +300,44 @@ class CallAnalyzer:
 
     # ── Public API ────────────────────────────────────────────────────────
 
-    def on_new_transcript(self, speaker: str, text: str) -> None:
-        if self._fast_task and not self._fast_task.done():
-            self._fast_task.cancel()
-        self._fast_task = asyncio.create_task(self._debounced_fast())
+    def on_new_transcript(self, speaker: str, text: str, is_final: bool = True) -> None:
+        # ── REFLEX (limbic) ────────────────────────────────────────────
+        if is_final:
+            # Final = complete thought → fire reflex instantly
+            # Cancel any pending partial reflex (final supersedes it)
+            existing = self._reflex_partial_tasks.pop(speaker, None)
+            if existing and not existing.done():
+                existing.cancel()
+            asyncio.create_task(self._reflex_check(speaker, text, is_final=True))
+        else:
+            # Partial = keep waiting for the speaker to pause
+            # Cancel any pending reflex for this speaker, schedule new one with delay
+            existing = self._reflex_partial_tasks.get(speaker)
+            if existing and not existing.done():
+                existing.cancel()
+            self._reflex_partial_tasks[speaker] = asyncio.create_task(
+                self._delayed_partial_reflex(speaker, text)
+            )
 
-        if self._full_task and not self._full_task.done():
-            self._full_task.cancel()
-        self._full_task = asyncio.create_task(self._debounced_full())
+        # ── REFLECTIVE (prefrontal): bigger context, periodic updates ───
+        if self._is_full_running:
+            self._full_pending = True
+        else:
+            if self._full_task and not self._full_task.done():
+                self._full_task.cancel()
+            self._full_task = asyncio.create_task(self._debounced_full())
 
-        # Fire needs extraction only when CLIENT speaks (not sales rep questions)
-        if speaker == "client":
+        # Fire needs extraction only when CLIENT speaks AND it's a final transcript
+        if speaker == "client" and is_final:
             asyncio.create_task(self._extract_needs_immediate(text))
+
+    async def _delayed_partial_reflex(self, speaker: str, text: str):
+        """Wait for natural pause before firing reflex on partial — simulates brain waiting for complete thought."""
+        try:
+            await asyncio.sleep(0.6)  # 600ms of no new partials = natural pause
+            await self._reflex_check(speaker, text, is_final=False)
+        except asyncio.CancelledError:
+            pass
 
     def trigger_fast(self) -> None:
         """Trigger fast analysis (e.g. after clientInfo update)."""
@@ -365,6 +443,282 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
         except Exception as e:
             logger.error(f"[{sid}][AI] Needs extraction error: {e}")
 
+    # ── REFLEX (limbic): instant tiny-context check ──────────────────────
+
+    async def _reflex_check(self, speaker: str, latest_text: str, is_final: bool = True):
+        """Tiny instant Gemini call: track qualification + profile + value Qs + needs.
+        On partials: only update qualification + value status (reversible).
+        On finals: also update profile + needs (high confidence)."""
+        sid = self.session.session_id
+        try:
+            # Tiny context: last 3 lines + the new text
+            recent = self.session.conversation[-3:]
+            context_lines = "\n".join(f"[{e['speaker']}]: {e['text']}" for e in recent)
+            mapped_speaker = "Sales Rep" if speaker == "sales" else "Client"
+            new_line = f"[{mapped_speaker}]: {latest_text}"
+            full_context = (context_lines + "\n" + new_line) if context_lines else new_line
+
+            # Existing tracked status
+            qual_lines = "\n".join(f"{k}: {v}" for k, v in self.session.qualification_status.items())
+            qual_ctx = f"\n\nAlready tracked qual (only UPGRADES):\n{qual_lines}" if qual_lines else ""
+
+            # Existing value status
+            val_lines = "\n".join(f"{k}: {v}" for k, v in self.session.value_status.items())
+            val_ctx = f"\n\nAlready tracked value (only UPGRADES):\n{val_lines}" if val_lines else ""
+
+            # Existing profile
+            prefilled = {k: v for k, v in self.session.client_profile.items() if v is not None}
+            profile_ctx = ""
+            if prefilled:
+                profile_ctx = "\n\nKnown profile (don't override, only add new fields):\n" + "\n".join(
+                    f"{k}: {v}" for k, v in prefilled.items()
+                )
+
+            # Existing needs
+            needs_ctx = ""
+            if self.session.locked_summary:
+                needs_lines = "\n".join(f"- {n[:80]}" for n in self.session.locked_summary[-10:])
+                needs_ctx = f"\n\nExisting needs (DO NOT repeat):\n{needs_lines}"
+
+            q_list = "\n".join(
+                f'{q["id"]}: {q["text"][:80]}'
+                for q in self._qual_questions
+            )
+
+            value_q_list = ""
+            if self.session.value_questions:
+                value_q_list = "\n\nValue justification questions to track:\n" + "\n".join(
+                    f'{q["id"]}: {q["text"][:80]}'
+                    for q in self.session.value_questions
+                )
+
+            language = detect_conversation_language(self.session.conversation, self.session.forced_language)
+            transcript_kind = "FINAL (complete sentence)" if is_final else "PARTIAL (may be incomplete)"
+
+            prompt = f"""Quick reflex check on a sales call. The latest text is a {transcript_kind}.
+
+Qualification questions to track:
+{q_list}{value_q_list}
+
+For EACH question, return status:
+- "asked" — rep asked it (match by meaning, any language)
+- "answered" — client provided info, OR confirmed it (e.g. "так", "вірно", "yes")
+- null — not yet
+
+EXTRACT new client profile fields ONLY IF clearly stated: name, role, company, industry, experience, painPoints, goal, course
+Return null for fields not clearly mentioned. DO NOT GUESS — when in doubt, return null.
+
+EXTRACT new client needs/problems/goals (in {language}, lowercase, short phrase).
+STRICT RULES for needs:
+- ONLY add if the CLIENT actually stated/confirmed the need themselves
+- If sales rep asks "do you have X problem?" — that is NOT a need until client confirms
+- DO NOT GUESS or infer needs from context — must be EXPLICITLY mentioned
+- Return empty list if no clear new need{qual_ctx}{val_ctx}{profile_ctx}{needs_ctx}
+
+Reply ONLY in JSON: {{"qualificationStatus":[{{"id":"q-xxx","status":"asked|answered|null"}}],"valueStatus":[{{"id":"v-xxx","status":"asked|answered|null"}}],"clientProfile":{{"name":null,"role":null,"company":null,"industry":null,"experience":null,"painPoints":null,"goal":null,"course":null}},"newNeeds":["need1","need2"]}}"""
+
+            response = await asyncio.to_thread(self._client.models.generate_content,
+                model=FAST_ANALYSIS_MODEL,
+                contents=[prompt, f"Recent:\n{full_context}"],
+                config={"response_mime_type": "application/json", "temperature": 0.0},
+            )
+
+            analysis = _parse_json(response.text)
+            if not analysis:
+                return
+
+            # Merge qualification status (only upgrade)
+            STATUS_RANK = {None: 0, "null": 0, "asked": 1, "answered": 2}
+            qs = analysis.get("qualificationStatus")
+            changed = False
+            if isinstance(qs, list):
+                for item in qs:
+                    if not isinstance(item, dict):
+                        continue
+                    qid = item.get("id", "")
+                    new_status = item.get("status")
+                    if not qid:
+                        continue
+                    current = self.session.qualification_status.get(qid)
+                    if STATUS_RANK.get(new_status, 0) > STATUS_RANK.get(current, 0):
+                        self.session.qualification_status[qid] = new_status
+                        changed = True
+
+            # Merge value status (only upgrade)
+            vs = analysis.get("valueStatus")
+            if isinstance(vs, list):
+                for item in vs:
+                    if not isinstance(item, dict):
+                        continue
+                    vid = item.get("id", "")
+                    new_status = item.get("status")
+                    if not vid:
+                        continue
+                    current = self.session.value_status.get(vid)
+                    if STATUS_RANK.get(new_status, 0) > STATUS_RANK.get(current, 0):
+                        self.session.value_status[vid] = new_status
+                        changed = True
+
+            # System 1: commit everything immediately (may be wrong, validator will fix)
+            # Merge profile (only add new fields)
+            cp = analysis.get("clientProfile")
+            if isinstance(cp, dict):
+                new_fields = {k: v for k, v in cp.items() if v and not self.session.client_profile.get(k)}
+                if new_fields:
+                    self.session.update_profile(new_fields)
+                    changed = True
+
+            # Add new needs (with dedup)
+            new_needs = analysis.get("newNeeds", [])
+            added_needs = []
+            if isinstance(new_needs, list):
+                for need in new_needs:
+                    if not need or not isinstance(need, str):
+                        continue
+                    need = need.strip().lstrip("•-– ")
+                    if not need or len(self.session.locked_summary) >= 20:
+                        continue
+                    need_lower = need.lower()
+                    is_dup = any(
+                        need_lower in ex.lower() or ex.lower() in need_lower
+                        for ex in self.session.locked_summary
+                    )
+                    if not is_dup:
+                        self.session.locked_summary.append(need)
+                        added_needs.append(need)
+                        changed = True
+            if added_needs:
+                logger.info(f"[{sid}][AI] Reflex new needs: {added_needs}")
+
+            # On finals, schedule System 2 validation (rational pass)
+            if is_final:
+                asyncio.create_task(self._validator_pass())
+
+            # Send update to frontend if anything changed
+            if changed:
+                payload = {
+                    "qualificationStatus": [
+                        {"id": qid, "status": status}
+                        for qid, status in self.session.qualification_status.items()
+                    ],
+                    "valueStatus": [
+                        {"id": vid, "status": status}
+                        for vid, status in self.session.value_status.items()
+                    ],
+                    "clientProfile": dict(self.session.client_profile),
+                    "summary": list(self.session.locked_summary),
+                }
+                try:
+                    await self.ws.send_json({"type": "analysis", "data": payload})
+                except Exception:
+                    pass
+
+                # Trigger value question generation when we have enough demographic + pain context
+                if (self.session.is_ready_for_value_questions()
+                        and self.session.value_batch_generated == 0
+                        and not self._is_generating_batch):
+                    self._is_generating_batch = True
+                    transcript = self.session.get_transcript_text(max_lines=25)
+                    asyncio.create_task(self._generate_value_questions(transcript, 1))
+
+        except Exception as e:
+            logger.error(f"[{sid}][AI] Reflex error: {e}")
+
+    # ── VALIDATOR (System 2): rational pass that corrects reflex mistakes ──
+
+    async def _validator_pass(self):
+        """Slower, more rational pass that reviews recent commits and corrects mistakes.
+        Uses broader context (10 lines) to validate profile + needs added by reflex."""
+        if getattr(self, "_validator_running", False):
+            return
+        self._validator_running = True
+        sid = self.session.session_id
+
+        try:
+            # Small delay to let related transcripts arrive
+            await asyncio.sleep(0.4)
+
+            # Use 10 lines of context for accurate validation
+            recent = self.session.conversation[-10:]
+            if not recent:
+                return
+            context_lines = "\n".join(f"[{e['speaker']}]: {e['text']}" for e in recent)
+
+            # Current state to validate
+            current_needs = list(self.session.locked_summary[-10:]) if self.session.locked_summary else []
+            current_profile = {k: v for k, v in self.session.client_profile.items() if v is not None}
+
+            language = detect_conversation_language(self.session.conversation, self.session.forced_language)
+
+            prompt = f"""You are a careful sales call analyzer. Validate that the recently extracted info is CORRECT based on the actual conversation. Be strict — fix any mistakes.
+
+Current client needs (extracted by fast reflex):
+{chr(10).join(f"- {n}" for n in current_needs) if current_needs else "(none)"}
+
+Current client profile (extracted by fast reflex):
+{chr(10).join(f"{k}: {v}" for k, v in current_profile.items()) if current_profile else "(none)"}
+
+Your job: review the actual conversation and return the CORRECTED state.
+
+Rules:
+- Only keep needs that the CLIENT actually stated explicitly. Remove any inferred or made-up needs.
+- Only keep profile fields that are clearly stated in the conversation. Remove guesses.
+- Write needs in {language}, lowercase, short phrases.
+- DO NOT remove needs/profile that came from CRM (we have no way to know this from the transcript, so be conservative — only remove things that are clearly wrong).
+
+Reply ONLY in JSON: {{
+  "validatedNeeds": ["clean list of correct needs"],
+  "validatedProfile": {{"name": "...", "role": "...", "company": "...", "industry": "...", "experience": "...", "painPoints": "...", "goal": "...", "course": "..."}},
+  "removedNeeds": ["needs that were wrong and should be removed"],
+  "corrections": ["short reason for each correction"]
+}}"""
+
+            response = await asyncio.to_thread(self._client.models.generate_content,
+                model=FULL_MODEL,  # Use the smarter model for validation
+                contents=[prompt, f"Conversation:\n{context_lines}"],
+                config={"response_mime_type": "application/json", "temperature": 0.0},
+            )
+
+            result = _parse_json(response.text)
+            if not result:
+                return
+
+            changed = False
+
+            # Apply removed needs
+            removed = result.get("removedNeeds", [])
+            if isinstance(removed, list) and removed:
+                removed_lowers = {n.lower().strip() for n in removed if isinstance(n, str)}
+                before_count = len(self.session.locked_summary)
+                self.session.locked_summary = [
+                    n for n in self.session.locked_summary
+                    if n.lower().strip() not in removed_lowers
+                ]
+                if len(self.session.locked_summary) < before_count:
+                    changed = True
+                    logger.info(f"[{sid}][Validator] Removed {before_count - len(self.session.locked_summary)} wrong needs: {removed}")
+
+            corrections = result.get("corrections", [])
+            if corrections:
+                logger.info(f"[{sid}][Validator] Corrections: {corrections}")
+
+            if changed:
+                try:
+                    await self.ws.send_json({
+                        "type": "analysis",
+                        "data": {
+                            "summary": list(self.session.locked_summary),
+                            "clientProfile": dict(self.session.client_profile),
+                        },
+                    })
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"[{sid}][Validator] error: {e}")
+        finally:
+            self._validator_running = False
+
     # ── Fast analysis ─────────────────────────────────────────────────────
 
     async def _run_fast_analysis(self):
@@ -374,7 +728,8 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
         sid = self.session.session_id
 
         try:
-            transcript = self.session.get_transcript_text()
+            # Limit context for fast analysis — only last 25 lines to keep prompt small + fast
+            transcript = self.session.get_transcript_text(max_lines=25)
 
             # Build prefill context from existing profile
             prefilled = {k: v for k, v in self.session.client_profile.items() if v is not None}
@@ -391,28 +746,35 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
                     "3. The q-confirm question is only 'answered' when the client EXPLICITLY confirms (says 'так', 'вірно', 'yes', 'correct', etc.) AFTER the rep asks the confirmation question. Pre-existing CRM data does NOT count as confirmation."
                 )
 
-            # Build value question tracking context
+            # Existing qual + value status (so AI doesn't need to re-detect what's already tracked)
+            existing_status_ctx = ""
+            if self.session.qualification_status:
+                existing_status_ctx += "\n\nAlready tracked qual status (only return UPGRADES, never downgrades):\n"
+                existing_status_ctx += "\n".join(f"{k}: {v}" for k, v in self.session.qualification_status.items())
+            if self.session.value_status:
+                existing_status_ctx += "\n\nAlready tracked value status:\n"
+                existing_status_ctx += "\n".join(f"{k}: {v}" for k, v in self.session.value_status.items())
+
+            # Build compact value question tracking context (only first 60 chars per question)
             value_ctx = ""
             if self.session.value_questions:
                 q_lines = "\n".join(
-                    f'   {i}. [id="{q["id"]}"] "{q["text"]}"'
-                    for i, q in enumerate(self.session.value_questions)
+                    f'{q["id"]}: {q["text"][:60]}'
+                    for q in self.session.value_questions
                 )
                 value_ctx = (
-                    f"\n\n4. **Value Question Tracking** — check these value justification questions:\n"
-                    f"{q_lines}\n\n"
-                    "   For each, return status: \"asked\" (rep asked this or similar by meaning), "
-                    "\"answered\" (client provided this info without being asked), or null.\n\n"
-                    "   Add to JSON response: \"valueStatus\": [{id, status}]"
+                    f"\n\n4. **Value Q Tracking** — return status for each: "
+                    f'"asked"/"answered"/null. Add "valueStatus": [{{id, status}}]:\n{q_lines}'
                 )
 
-            # Pass existing needs so model doesn't duplicate
+            # Pass existing needs (last 10 only) so model doesn't duplicate
             needs_ctx = ""
             if self.session.locked_summary:
-                needs_lines = "\n".join(f"- {n}" for n in self.session.locked_summary)
-                needs_ctx = f"\n\nExisting client needs (DO NOT repeat these):\n{needs_lines}"
+                recent_needs = self.session.locked_summary[-10:]
+                needs_lines = "\n".join(f"- {n[:80]}" for n in recent_needs)
+                needs_ctx = f"\n\nExisting needs (DO NOT repeat):\n{needs_lines}"
 
-            prompt = self._fast_prompt + prefill_ctx + value_ctx + needs_ctx
+            prompt = self._fast_prompt + prefill_ctx + existing_status_ctx + value_ctx + needs_ctx
             logger.info(f"[{sid}][AI] Fast analysis triggered (debounce {FAST_DEBOUNCE_S}s)")
 
             response = await asyncio.to_thread(self._client.models.generate_content,
@@ -427,11 +789,25 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
                 return
 
             # Normalize qualificationStatus → list of {id, status}
+            # MERGE with persistent state — once asked/answered, never go back to null
+            STATUS_RANK = {None: 0, "null": 0, "asked": 1, "answered": 2}
             qs = analysis.get("qualificationStatus")
             if isinstance(qs, list):
+                for item in qs:
+                    if not isinstance(item, dict):
+                        continue
+                    qid = item.get("id", "")
+                    new_status = item.get("status")
+                    if not qid:
+                        continue
+                    current = self.session.qualification_status.get(qid)
+                    # Only upgrade — never downgrade
+                    if STATUS_RANK.get(new_status, 0) > STATUS_RANK.get(current, 0):
+                        self.session.qualification_status[qid] = new_status
+                # Send merged state to frontend
                 analysis["qualificationStatus"] = [
-                    {"id": item.get("id", ""), "status": item.get("status")}
-                    for item in qs if isinstance(item, dict)
+                    {"id": qid, "status": status}
+                    for qid, status in self.session.qualification_status.items()
                 ]
 
             # Normalize clientProfile → ensure all PROFILE_FIELDS present
@@ -440,11 +816,22 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
                 analysis["clientProfile"] = {f: cp.get(f) for f in PROFILE_FIELDS}
 
             # Normalize valueStatus → list of {id, status}
+            # Same merge logic — once asked/answered, never go back
             vs = analysis.get("valueStatus")
             if isinstance(vs, list):
+                for item in vs:
+                    if not isinstance(item, dict):
+                        continue
+                    vid = item.get("id", "")
+                    new_status = item.get("status")
+                    if not vid:
+                        continue
+                    current = self.session.value_status.get(vid)
+                    if STATUS_RANK.get(new_status, 0) > STATUS_RANK.get(current, 0):
+                        self.session.value_status[vid] = new_status
                 analysis["valueStatus"] = [
-                    {"id": item.get("id", ""), "status": item.get("status")}
-                    for item in vs if isinstance(item, dict)
+                    {"id": vid, "status": status}
+                    for vid, status in self.session.value_status.items()
                 ]
 
             logger.info(
@@ -503,8 +890,8 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
             if analysis.get("clientProfile"):
                 self.session.update_profile(analysis["clientProfile"])
 
-                # Trigger batch 1 when ≥2 tag fields filled
-                if self.session.get_filled_tag_fields() >= 2 and self.session.value_batch_generated == 0 and not self._is_generating_batch:
+                # Trigger batch 1 when we have enough demographic + pain context
+                if self.session.is_ready_for_value_questions() and self.session.value_batch_generated == 0 and not self._is_generating_batch:
                     self._is_generating_batch = True
                     asyncio.create_task(self._generate_value_questions(transcript, 1))
 
@@ -512,6 +899,10 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
             logger.error(f"[{sid}][AI] Fast analysis error: {e}")
         finally:
             self._is_fast_running = False
+            # If new transcript came in while we were running, fire another run
+            if self._fast_pending:
+                self._fast_pending = False
+                self._fast_task = asyncio.create_task(self._debounced_fast())
 
     # ── Full analysis ─────────────────────────────────────────────────────
 
@@ -522,7 +913,8 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
         sid = self.session.session_id
 
         try:
-            transcript = self.session.get_transcript_text()
+            # Limit context — full analysis only needs recent context for offer recommendation
+            transcript = self.session.get_transcript_text(max_lines=40)
             language = detect_conversation_language(self.session.conversation, self.session.forced_language)
 
             lang_ctx = (
@@ -556,6 +948,9 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
             logger.error(f"[{sid}][AI] Full analysis error: {e}")
         finally:
             self._is_full_running = False
+            if self._full_pending:
+                self._full_pending = False
+                self._full_task = asyncio.create_task(self._debounced_full())
 
     # ── Value question generation ─────────────────────────────────────────
 

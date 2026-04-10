@@ -7,6 +7,10 @@ SPEAKER_MAP = {"client": "Client", "sales": "Sales Rep"}
 
 PROFILE_FIELDS = ("name", "role", "company", "industry", "experience", "painPoints", "goal", "course")
 TAG_FIELDS = ("industry", "experience", "company", "painPoints", "goal")
+# Demographic fields (about who the client is)
+DEMOGRAPHIC_FIELDS = ("role", "industry", "company", "experience")
+# Pain/goal fields (what the client needs)
+PAIN_FIELDS = ("painPoints", "goal")
 
 
 class CallSession:
@@ -54,8 +58,12 @@ class CallSession:
         self.conversation.append(new_entry)
         logger.info(f"[{self.session_id}] Added transcript: [{mapped}]: \"{text[:120]}\"")
 
-    def get_transcript_text(self) -> str:
-        lines = [f"[{e['speaker']}]: {e['text']}" for e in self.conversation]
+    def get_transcript_text(self, max_lines: int | None = None) -> str:
+        """Get conversation transcript. If max_lines set, returns only the most recent N lines."""
+        convo = self.conversation
+        if max_lines is not None and len(convo) > max_lines:
+            convo = convo[-max_lines:]
+        lines = [f"[{e['speaker']}]: {e['text']}" for e in convo]
         # Append pending interim transcripts so AI can react before finals arrive
         for sp, text in self.pending_partial.items():
             if text:
@@ -73,3 +81,14 @@ class CallSession:
 
     def get_filled_tag_fields(self) -> int:
         return sum(1 for f in TAG_FIELDS if self.client_profile.get(f) is not None)
+
+    def is_ready_for_value_questions(self) -> bool:
+        """Check if we have enough info to generate specialized value questions.
+        Need: 2+ demographic fields (role/industry/company/experience)
+              AND 1+ pain/goal field (painPoints/goal)."""
+        demo_count = sum(1 for f in DEMOGRAPHIC_FIELDS if self.client_profile.get(f))
+        pain_count = sum(1 for f in PAIN_FIELDS if self.client_profile.get(f))
+        # Also check locked needs as a fallback for pain
+        if pain_count == 0 and self.locked_summary:
+            pain_count = 1
+        return demo_count >= 2 and pain_count >= 1
