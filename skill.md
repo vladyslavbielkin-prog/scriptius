@@ -101,12 +101,13 @@ Shows how ready the client is to hear the offer. Each segment has its own color:
 **Statuses**:
 - **Unchecked** — not yet asked or mentioned
 - **Checked (asked)** — the sales rep asked this question (or any question covering the same topic, in any language)
-- **Checked (answered)** — the client volunteered this info without being asked
+- **Crossed out ("Not relevant")** — the client already provided the info (in any context). The rep doesn't need to ask it again — the question is resolved.
 
 **How it updates**:
 - Powered by `gemini-2.5-flash-lite` (fast analysis, 0.1s debounce)
 - Matches by **meaning**, not exact wording — "What do you do?" counts as asking about role
-- Updates within ~1-2 seconds of the question being asked
+- **One answer can resolve multiple questions**: if you ask "What's your position?" and the client says "I'm a senior marketer at TechCorp in IT for 5 years", that single answer crosses out role, experience, company, AND industry questions at once. No need to ask them separately.
+- Updates within ~1-2 seconds of the question being answered
 
 **Tips**:
 - Go through these in order at the start of the call

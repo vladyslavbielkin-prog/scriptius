@@ -17,7 +17,7 @@ FAST_ANALYSIS_MODEL = "gemini-2.5-flash-lite"
 FULL_MODEL = "gemini-2.5-flash"
 VALUE_GEN_MODEL = "gemini-2.5-flash-lite"
 
-FAST_DEBOUNCE_S = 0.1
+FAST_DEBOUNCE_S = 0.05  # ~50ms — enough to coalesce bursts of partials
 FULL_DEBOUNCE_S = 1.5
 
 # ── Qualification questions ──────────────────────────────────────────────────
@@ -110,9 +110,13 @@ Do THREE things:
 {q_list}
 
    For each, return status:
-   - "asked" — rep asked this OR any question covering the same info (match by MEANING, any language). Example: "What do you do?" covers q-role. "Tell me about your challenges" covers q-pain. "Бачу ви вказали..." covers q-confirm.
-   - "answered" — client mentioned this info without being asked, OR client confirmed/agreed (e.g. "так", "вірно", "да"). Example: "I'm a marketing manager" → q-role answered. Client says "так, вірно" after confirmation question → q-confirm answered.
-   - null — not yet asked or mentioned.
+   - "asked" — rep asked this OR any question covering the same info (match by MEANING, any language). Example: "What do you do?" covers q-role. "Бачу ви вказали..." covers q-confirm.
+   - "answered" — client mentioned the info, REGARDLESS of whether it was asked. This is the MOST IMPORTANT status. Mark as "answered" whenever the client provides relevant info — even if it came up in response to a different question, even if mentioned naturally in conversation, even if the rep never asked.
+   - null — not yet asked AND not yet mentioned.
+
+   CRITICAL: One client answer can cover multiple qualification questions at once. Example: rep asks "What's your position?" and client says "I'm a senior marketer at TechCorp in the IT industry for 5 years" — this answer covers q-role, q-experience, q-company, AND q-industry. Mark ALL of them as "answered" in this case.
+
+   Always prefer "answered" over "asked" when the client has actually provided the info — "answered" means the question is RESOLVED and the rep doesn't need to ask it again.
 
 2. **Client Profile** — extract any info about the CLIENT mentioned ANYWHERE in the transcript (from client statements OR from rep paraphrasing/confirming client info). Return null if truly unknown.
    Fields: name, role, company, industry, experience, painPoints, goal, course
@@ -378,9 +382,13 @@ Reply ONLY in JSON: {{ "newNeeds": ["need1", "need2"] }}"""
             if prefilled:
                 fields_str = "\n".join(f"{k}: {v}" for k, v in prefilled.items())
                 prefill_ctx = (
-                    f"\n\nPre-known client info (from CRM):\n{fields_str}\n"
-                    "Keep these values in the clientProfile response. "
-                    "Only override if the conversation clearly contradicts them."
+                    f"\n\nPre-known client info (from CRM, NOT from the conversation):\n{fields_str}\n"
+                    "IMPORTANT RULES for this CRM data:\n"
+                    "1. Keep these values in the clientProfile response. Only override if the conversation clearly contradicts them.\n"
+                    "2. DO NOT mark qualification questions as 'answered' just because this CRM data exists. "
+                    "The 'answered' status is ONLY for info that was ACTUALLY MENTIONED IN THE TRANSCRIPT by the client or rep. "
+                    "If the client hasn't yet confirmed this info verbally during the call, the question is still null or 'asked' — NOT 'answered'.\n"
+                    "3. The q-confirm question is only 'answered' when the client EXPLICITLY confirms (says 'так', 'вірно', 'yes', 'correct', etc.) AFTER the rep asks the confirmation question. Pre-existing CRM data does NOT count as confirmation."
                 )
 
             # Build value question tracking context

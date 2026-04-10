@@ -96,6 +96,22 @@ h1, h2, h3 {
   gap: 20px;
 }
 
+.header-stt-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+}
+
+.header-stt-select:focus {
+  border-color: var(--green);
+}
+
 .header-controls {
   display: flex;
   align-items: center;
@@ -347,6 +363,10 @@ body.transcript-open .calls-layout {
 }
 
 .hubspot-field {
+  margin-bottom: 12px;
+}
+
+.stt-field {
   margin-bottom: 12px;
 }
 

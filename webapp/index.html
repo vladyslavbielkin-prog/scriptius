@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=14" />
 </head>
 <body>
 
@@ -24,6 +24,12 @@
   </div>
   <div class="header-right">
     <div class="header-controls">
+      <select id="sttSelect" class="header-stt-select" title="STT Engine">
+        <option value="latest_long_v1">Google v1</option>
+        <option value="chirp_v2">Google Chirp v2</option>
+        <option value="deepgram">Deepgram Nova-3</option>
+        <option value="speechmatics">Speechmatics</option>
+      </select>
       <button id="btnStart" class="btn btn-start">Start Call</button>
       <button id="btnStop" class="btn btn-stop" disabled>Stop</button>
       <div class="status">
@@ -78,6 +84,12 @@
             <select id="countrySelect" class="course-select">
               <option value="UA">Ukraine</option>
               <option value="US">USA</option>
+              <option value="HU">Hungary</option>
+              <option value="PL">Poland</option>
+              <option value="CZ">Czech Republic</option>
+              <option value="TR">Turkey</option>
+              <option value="RO">Romania</option>
+              <option value="ES">Spain</option>
             </select>
           </div>
           <div class="profile-field course-field">
@@ -89,6 +101,7 @@
             </select>
           </div>
         </div>
+
 
         <div class="profile-grid">
           <div class="profile-field">
@@ -325,6 +338,6 @@
   <div id="micValue">0</div>
 </div>
 
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

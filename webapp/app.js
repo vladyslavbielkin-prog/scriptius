@@ -132,9 +132,10 @@ function connectBackend() {
   backendWs.onopen = () => {
     console.log('[Backend] Connected');
     backendDot.className = 'conn-dot connected';
-    // Send language before start_call so the session knows the language from the start
-    const lang = currentLang === 'en' ? 'English' : 'Ukrainian';
-    backendWs.send(JSON.stringify({ type: 'setLanguage', language: lang }));
+    // Send STT engine + language before start_call
+    backendWs.send(JSON.stringify({ type: 'setSttEngine', engine: currentSttEngine }));
+    const aiLang = COUNTRY_AI_LANG[currentCountry] || 'English';
+    backendWs.send(JSON.stringify({ type: 'setLanguage', language: aiLang, country: currentCountry }));
     backendWs.send(JSON.stringify({ type: 'start_call' }));
   };
 
@@ -928,8 +929,33 @@ function initCourseSelector() {
 
 // ── Country Selector ────────────────────────────────────────
 
+// Country → primary language code mapping
+const COUNTRY_LANG = {
+  UA: 'uk',  // Ukrainian (also Russian commonly spoken)
+  US: 'en',  // English
+  HU: 'hu',  // Hungarian
+  PL: 'pl',  // Polish
+  CZ: 'cs',  // Czech
+  TR: 'tr',  // Turkish
+  RO: 'ro',  // Romanian
+  ES: 'es',  // Spanish
+};
+
+// Country → AI language name (for Gemini prompts)
+const COUNTRY_AI_LANG = {
+  UA: 'Ukrainian',
+  US: 'English',
+  HU: 'Hungarian',
+  PL: 'Polish',
+  CZ: 'Czech',
+  TR: 'Turkish',
+  RO: 'Romanian',
+  ES: 'Spanish',
+};
+
 // Global language state
-let currentLang = 'uk'; // 'uk' or 'en'
+let currentLang = 'uk';
+let currentCountry = 'UA';
 
 const QUESTIONS_I18N = {
   uk: {
@@ -950,9 +976,6 @@ const QUESTIONS_I18N = {
     offerCert: 'Сертифікат про закінчення курсу',
     offerLms: 'Доступ до LMS платформи та спільноти',
     offerProject: 'Фінальний проєкт з менторською підтримкою',
-    needsTitle: 'Client Needs & Problems',
-    waitingNeeds: 'Waiting for conversation...',
-    waitingOffer: 'Waiting for analysis...',
   },
   en: {
     available: 'Is it a good time to talk right now?',
@@ -972,9 +995,120 @@ const QUESTIONS_I18N = {
     offerCert: 'Certificate of completion',
     offerLms: 'Access to LMS platform and community',
     offerProject: 'Final project with mentor support',
-    needsTitle: 'Client Needs & Problems',
-    waitingNeeds: 'Waiting for conversation...',
-    waitingOffer: 'Waiting for analysis...',
+  },
+  hu: {
+    available: 'Most kényelmes Önnek beszélni?',
+    role: 'Milyen pozícióban dolgozik és melyik iparágban?',
+    experience: 'Hány éve dolgozik ezen a területen?',
+    company: 'Melyik cégnél dolgozik?',
+    industry: 'Melyik iparágban dolgozik?',
+    pain: 'Mondja, mi keltette fel az érdeklődését a kurzusunk iránt? Miben lehetne hasznos Önnek?',
+    confirmPrefix: 'Látom, Ön azt jelezte, hogy',
+    confirmRole: 'mint',
+    confirmIndustry: 'a {val} iparágban dolgozik',
+    confirmCompany: 'a',
+    confirmExpYears: 'már {val} éve',
+    confirmExpLevel: 'szinten',
+    confirmExp: 'már',
+    confirmSuffix: '. Helyes?',
+    offerCert: 'Tanúsítvány a kurzus elvégzéséről',
+    offerLms: 'Hozzáférés az LMS platformhoz és a közösséghez',
+    offerProject: 'Záróprojekt mentori támogatással',
+  },
+  pl: {
+    available: 'Czy to dobry moment, żeby porozmawiać?',
+    role: 'Jakie jest Pana/Pani stanowisko i w jakiej branży Pan/Pani pracuje?',
+    experience: 'Ile lat doświadczenia ma Pan/Pani w tej dziedzinie?',
+    company: 'W jakiej firmie Pan/Pani pracuje?',
+    industry: 'W jakiej branży Pan/Pani pracuje?',
+    pain: 'Proszę powiedzieć, co zainteresowało Pana/Panią w naszym kursie? Jak mógłby być przydatny?',
+    confirmPrefix: 'Widzę, że wskazał Pan/Pani, że',
+    confirmRole: 'pracuje jako',
+    confirmIndustry: 'w branży {val}',
+    confirmCompany: 'w firmie',
+    confirmExpYears: 'już {val} lat',
+    confirmExpLevel: 'na poziomie',
+    confirmExp: 'już',
+    confirmSuffix: '. Czy to się zgadza?',
+    offerCert: 'Certyfikat ukończenia kursu',
+    offerLms: 'Dostęp do platformy LMS i społeczności',
+    offerProject: 'Projekt końcowy ze wsparciem mentora',
+  },
+  cs: {
+    available: 'Hodí se Vám teď mluvit?',
+    role: 'Jaká je Vaše pozice a v jakém oboru pracujete?',
+    experience: 'Kolik let zkušeností máte v tomto oboru?',
+    company: 'Pro jakou společnost pracujete?',
+    industry: 'V jakém oboru pracujete?',
+    pain: 'Řekněte mi, co Vás zaujalo na našem kurzu? Jak by Vám mohl být užitečný?',
+    confirmPrefix: 'Vidím, že jste uvedl/a, že',
+    confirmRole: 'pracujete jako',
+    confirmIndustry: 'v oboru {val}',
+    confirmCompany: 've společnosti',
+    confirmExpYears: 'již {val} let',
+    confirmExpLevel: 'na úrovni',
+    confirmExp: 'již',
+    confirmSuffix: '. Je to správně?',
+    offerCert: 'Certifikát o absolvování kurzu',
+    offerLms: 'Přístup k LMS platformě a komunitě',
+    offerProject: 'Závěrečný projekt s mentorskou podporou',
+  },
+  tr: {
+    available: 'Şu an konuşmak için uygun musunuz?',
+    role: 'Pozisyonunuz ne ve hangi sektörde çalışıyorsunuz?',
+    experience: 'Bu alanda kaç yıllık deneyiminiz var?',
+    company: 'Hangi şirkette çalışıyorsunuz?',
+    industry: 'Hangi sektörde çalışıyorsunuz?',
+    pain: 'Söyleyin, kursumuzun neresi ilginizi çekti? Size nasıl faydalı olabilir?',
+    confirmPrefix: 'Görüyorum ki şunu belirtmişsiniz:',
+    confirmRole: 'olarak çalışıyorsunuz:',
+    confirmIndustry: '{val} sektöründe',
+    confirmCompany: 'şirketinde',
+    confirmExpYears: '{val} yıldır',
+    confirmExpLevel: 'seviyesinde',
+    confirmExp: 'beri',
+    confirmSuffix: '. Doğru mu?',
+    offerCert: 'Kurs tamamlama sertifikası',
+    offerLms: 'LMS platformuna ve topluluğa erişim',
+    offerProject: 'Mentor destekli final projesi',
+  },
+  ro: {
+    available: 'Vă convine să vorbim acum?',
+    role: 'Care este poziția dvs. și în ce industrie lucrați?',
+    experience: 'Câți ani de experiență aveți în acest domeniu?',
+    company: 'La ce companie lucrați?',
+    industry: 'În ce industrie lucrați?',
+    pain: 'Spuneți-mi, ce v-a interesat la cursul nostru? Cu ce v-ar putea fi util?',
+    confirmPrefix: 'Văd că ați menționat că',
+    confirmRole: 'lucrați ca',
+    confirmIndustry: 'în industria {val}',
+    confirmCompany: 'la',
+    confirmExpYears: 'de {val} ani',
+    confirmExpLevel: 'la nivel de',
+    confirmExp: 'de',
+    confirmSuffix: '. Este corect?',
+    offerCert: 'Certificat de absolvire a cursului',
+    offerLms: 'Acces la platforma LMS și la comunitate',
+    offerProject: 'Proiect final cu suport mentor',
+  },
+  es: {
+    available: '¿Es un buen momento para hablar?',
+    role: '¿Cuál es su puesto actual y en qué industria trabaja?',
+    experience: '¿Cuántos años de experiencia tiene en este campo?',
+    company: '¿En qué empresa trabaja?',
+    industry: '¿En qué industria trabaja?',
+    pain: 'Dígame, ¿qué le interesó de nuestro curso? ¿En qué podría serle útil?',
+    confirmPrefix: 'Veo que mencionó que',
+    confirmRole: 'trabaja como',
+    confirmIndustry: 'en la industria {val}',
+    confirmCompany: 'en',
+    confirmExpYears: 'desde hace {val} años',
+    confirmExpLevel: 'a nivel',
+    confirmExp: 'desde hace',
+    confirmSuffix: '. ¿Es correcto?',
+    offerCert: 'Certificado de finalización del curso',
+    offerLms: 'Acceso a la plataforma LMS y a la comunidad',
+    offerProject: 'Proyecto final con apoyo de mentor',
   },
 };
 
@@ -984,11 +1118,13 @@ function initCountrySelector() {
 
   select.addEventListener('change', (e) => {
     const country = e.target.value;
-    currentLang = country === 'US' ? 'en' : 'uk';
+    currentCountry = country;
+    currentLang = COUNTRY_LANG[country] || 'en';
+    const aiLang = COUNTRY_AI_LANG[country] || 'English';
 
     // Send language to backend
     if (backendWs && backendWs.readyState === WebSocket.OPEN) {
-      backendWs.send(JSON.stringify({ type: 'setLanguage', language: currentLang === 'en' ? 'English' : 'Ukrainian' }));
+      backendWs.send(JSON.stringify({ type: 'setLanguage', language: aiLang, country: country }));
     }
 
     // Update qualification questions in current language
@@ -1005,6 +1141,29 @@ function initCountrySelector() {
     }
     rebuildQualificationQuestions(profile);
 
+    select.classList.add('has-value');
+  });
+}
+
+// ── STT Engine Selector ────────────────────────────────────
+
+let currentSttEngine = 'latest_long_v1';
+
+function initSttSelector() {
+  const select = document.getElementById('sttSelect');
+  if (!select) return;
+  // Restore from localStorage
+  const saved = localStorage.getItem('sttEngine');
+  if (saved) {
+    select.value = saved;
+    currentSttEngine = saved;
+  }
+  select.addEventListener('change', (e) => {
+    currentSttEngine = e.target.value;
+    localStorage.setItem('sttEngine', currentSttEngine);
+    if (backendWs && backendWs.readyState === WebSocket.OPEN) {
+      backendWs.send(JSON.stringify({ type: 'setSttEngine', engine: currentSttEngine }));
+    }
     select.classList.add('has-value');
   });
 }
@@ -1234,6 +1393,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initCheckboxListeners();
   initCourseSelector();
   initCountrySelector();
+  initSttSelector();
   initHubspotLoader();
   updateSectionStates();
 

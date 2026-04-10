@@ -19,7 +19,9 @@ router = APIRouter()
 GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 GOOGLE_STT_LOCATION = os.getenv("GOOGLE_STT_LOCATION", "europe-west4")
-STT_ENGINE = os.getenv("STT_ENGINE", "chirp_v2")  # "chirp_v2" or "latest_long_v1"
+STT_ENGINE = os.getenv("STT_ENGINE", "chirp_v2")  # "chirp_v2", "latest_long_v1", "deepgram", "speechmatics"
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+SPEECHMATICS_API_KEY = os.getenv("SPEECHMATICS_API_KEY", "")
 
 RECONNECT_SECONDS = 270
 OVERLAP_MAX_BYTES = 8 * 32000  # ~8 seconds of 16kHz 16-bit mono
@@ -43,6 +45,7 @@ FILLER_WORDS = frozenset({
 @dataclasses.dataclass
 class EventCallbacks:
     on_transcript: object = None   # (speaker, text, is_final) -> None
+    on_partial: object = None      # (speaker, text) -> None — interim updates
     on_vad_event: object = None    # (speaker, event) -> None
     on_call_start: object = None   # (session_id) -> None
     on_call_end: object = None     # (session_id) -> None
@@ -135,18 +138,23 @@ MAX_RECONNECTS = 10
 async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
                          websocket: WebSocket, credentials, session_id: str,
                          callbacks: EventCallbacks = None, language: str = "uk-UA"):
-    """Stream audio to Google Speech v2 with chirp model."""
+    """Stream audio to Google Speech v2 with chirp_2 model from global region."""
     from google.cloud.speech_v2 import SpeechAsyncClient
     from google.cloud.speech_v2.types import cloud_speech
     from google.api_core.client_options import ClientOptions
 
+    # Try europe-west4 first for European users (lower latency than us-central1)
+    region = "europe-west4"
     client = SpeechAsyncClient(
         credentials=credentials,
         client_options=ClientOptions(
-            api_endpoint=f"{GOOGLE_STT_LOCATION}-speech.googleapis.com"
+            api_endpoint=f"{region}-speech.googleapis.com"
         ),
     )
-    recognizer = f"projects/{GOOGLE_PROJECT_ID}/locations/{GOOGLE_STT_LOCATION}/recognizers/_"
+    recognizer = f"projects/{GOOGLE_PROJECT_ID}/locations/{region}/recognizers/_"
+
+    # us-central1 has chirp_2 with interim but only single language
+    lang_codes = [language]
 
     recognition_config = cloud_speech.RecognitionConfig(
         explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
@@ -154,8 +162,8 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
             sample_rate_hertz=16000,
             audio_channel_count=1,
         ),
-        language_codes=[language, "en-US", "ru-RU"] if language != "en-US" else ["en-US", "uk-UA", "ru-RU"],
-        model="chirp",
+        language_codes=lang_codes,
+        model="chirp_2",
         features=cloud_speech.RecognitionFeatures(
             enable_automatic_punctuation=True,
         ),
@@ -163,7 +171,7 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
     streaming_config = cloud_speech.StreamingRecognitionConfig(
         config=recognition_config,
         streaming_features=cloud_speech.StreamingRecognitionFeatures(
-            interim_results=False,  # chirp v2 uk-UA doesn't support interim
+            interim_results=True,  # chirp_2 supports interim
         ),
     )
 
@@ -290,8 +298,15 @@ async def _stream_stt_v2(audio_queue: asyncio.Queue, speaker: str,
                 except Exception:
                     call_ended = True
                     return
-                if callbacks and callbacks.on_transcript:
-                    callbacks.on_transcript(speaker, text, is_final)
+                if callbacks:
+                    if is_final:
+                        if callbacks.on_partial:
+                            callbacks.on_partial(speaker, "")
+                        if callbacks.on_transcript:
+                            callbacks.on_transcript(speaker, text, True)
+                    else:
+                        if callbacks.on_partial:
+                            callbacks.on_partial(speaker, text)
                 if is_final:
                     last_sent_text = ""
 
@@ -350,6 +365,16 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
         primary_lang = "uk-UA"
         alt_langs = ["en-US", "ru-RU"]
 
+    # Phrase hints — common sales/course vocabulary to boost recognition
+    sales_phrases = [
+        "курс", "програма", "ціна", "оплата", "сертифікат", "ментор",
+        "маркетолог", "менеджер", "директор", "розробник", "дизайнер",
+        "управління командою", "Excel для бізнесу", "LMS платформа",
+        "проєкт", "досвід", "індустрія", "компанія", "посада",
+        "course", "program", "price", "payment", "certificate", "mentor",
+        "marketing", "manager", "director", "developer", "designer",
+    ]
+
     streaming_config = speech_v1.StreamingRecognitionConfig(
         config=speech_v1.RecognitionConfig(
             encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
@@ -357,7 +382,11 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
             language_code=primary_lang,
             alternative_language_codes=alt_langs,
             model="latest_long",
+            use_enhanced=True,
             enable_automatic_punctuation=True,
+            speech_contexts=[
+                speech_v1.SpeechContext(phrases=sales_phrases, boost=15.0)
+            ],
         ),
         interim_results=True,
     )
@@ -481,8 +510,15 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
                 except Exception:
                     call_ended = True
                     return
-                if callbacks and callbacks.on_transcript:
-                    callbacks.on_transcript(speaker, text, is_final)
+                if callbacks:
+                    if is_final:
+                        if callbacks.on_partial:
+                            callbacks.on_partial(speaker, "")
+                        if callbacks.on_transcript:
+                            callbacks.on_transcript(speaker, text, True)
+                    else:
+                        if callbacks.on_partial:
+                            callbacks.on_partial(speaker, text)
                 if is_final:
                     last_sent_text = ""
 
@@ -523,6 +559,309 @@ async def _stream_stt_v1(audio_queue: asyncio.Queue, speaker: str,
     logger.info(f"[{session_id}][{speaker}] STT stream ended")
 
 
+# ── STT streaming (Deepgram Nova-3) ──────────────────────────────────────────
+
+async def _stream_stt_deepgram(audio_queue: asyncio.Queue, speaker: str,
+                                websocket: WebSocket, credentials, session_id: str,
+                                callbacks: EventCallbacks = None, language: str = "uk-UA"):
+    """Stream audio to Deepgram Nova-3 via raw WebSocket."""
+    import websockets
+    import ssl
+    import certifi
+    from urllib.parse import urlencode
+
+    if not DEEPGRAM_API_KEY:
+        logger.error(f"[{session_id}][{speaker}] DEEPGRAM_API_KEY not set")
+        return
+
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+
+    # Map language to Deepgram code (specific language is much more accurate than "multi")
+    dg_lang_map = {
+        "uk-UA": "uk", "en-US": "en", "ru-RU": "ru",
+        "pl-PL": "pl", "hu-HU": "hu", "ro-RO": "ro",
+        "tr-TR": "tr", "cs-CZ": "cs",
+    }
+    dg_lang = dg_lang_map.get(language, "uk")
+
+    params = {
+        "model": "nova-3",
+        "language": dg_lang,
+        "encoding": "linear16",
+        "sample_rate": 16000,
+        "channels": 1,
+        "interim_results": "true",
+        "punctuate": "true",
+        "smart_format": "true",
+        "endpointing": "300",        # 300ms silence → finalize quickly
+        "utterance_end_ms": "1000",  # max wait 1s for full utterance
+        "filler_words": "false",
+        "numerals": "true",
+        "vad_events": "true",        # gate transcription on real speech
+        "no_delay": "false",         # wait for confidence
+    }
+    url = f"wss://api.deepgram.com/v1/listen?{urlencode(params)}"
+
+    call_ended = False
+    reconnect_count = 0
+
+    while not call_ended:
+        try:
+            async with websockets.connect(
+                url,
+                additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"},
+                ssl=ssl_ctx,
+                max_size=10 * 1024 * 1024,
+            ) as ws:
+                logger.info(f"[{session_id}][{speaker}] Deepgram stream started")
+                reconnect_count = 0
+
+                async def send_audio():
+                    nonlocal call_ended
+                    while not call_ended:
+                        try:
+                            chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            continue
+                        if chunk is None:
+                            call_ended = True
+                            try:
+                                await ws.send(json.dumps({"type": "CloseStream"}))
+                            except Exception:
+                                pass
+                            return
+                        try:
+                            await ws.send(chunk)
+                        except Exception as e:
+                            logger.error(f"[{session_id}][{speaker}] Deepgram send error: {e}")
+                            return
+
+                async def recv_transcripts():
+                    async for msg in ws:
+                        if not isinstance(msg, str):
+                            continue
+                        try:
+                            data = json.loads(msg)
+                        except json.JSONDecodeError:
+                            continue
+                        if data.get("type") != "Results":
+                            continue
+                        channel = data.get("channel", {})
+                        alts = channel.get("alternatives", [])
+                        if not alts:
+                            continue
+                        text = alts[0].get("transcript", "").strip()
+                        if not text:
+                            continue
+                        # Filter hallucinations: require reasonable confidence
+                        confidence = alts[0].get("confidence", 1.0)
+                        if confidence < 0.5:
+                            continue
+                        is_final = data.get("is_final", False)
+                        if is_final and _is_filler_only(text):
+                            logger.info(f"[{session_id}][{speaker}] suppressed filler: {text}")
+                            continue
+                        logger.info(
+                            f"[{session_id}][{speaker}] "
+                            f"{'FINAL' if is_final else 'interim'}: {text[:200]}"
+                        )
+                        try:
+                            await websocket.send_json({
+                                "type": "transcript",
+                                "speaker": speaker,
+                                "text": text,
+                                "interim": not is_final,
+                            })
+                        except Exception:
+                            pass
+                        # Trigger AI analysis on partials and finals for instant updates
+                        if callbacks:
+                            if is_final:
+                                if callbacks.on_partial:
+                                    callbacks.on_partial(speaker, "")
+                                if callbacks.on_transcript:
+                                    callbacks.on_transcript(speaker, text, True)
+                            else:
+                                if callbacks.on_partial:
+                                    callbacks.on_partial(speaker, text)
+
+                await asyncio.gather(send_audio(), recv_transcripts(), return_exceptions=True)
+
+        except Exception as e:
+            logger.error(f"[{session_id}][{speaker}] Deepgram stream error: {e}")
+            if call_ended:
+                break
+            reconnect_count += 1
+            if reconnect_count > MAX_RECONNECTS:
+                break
+            await asyncio.sleep(min(0.5 * reconnect_count, 5.0))
+
+    logger.info(f"[{session_id}][{speaker}] Deepgram stream ended")
+
+
+# ── STT streaming (Speechmatics) ─────────────────────────────────────────────
+
+async def _stream_stt_speechmatics(audio_queue: asyncio.Queue, speaker: str,
+                                    websocket: WebSocket, credentials, session_id: str,
+                                    callbacks: EventCallbacks = None, language: str = "uk-UA"):
+    """Stream audio to Speechmatics Real-Time API with multilingual support."""
+    import websockets
+    import ssl
+    import certifi
+
+    if not SPEECHMATICS_API_KEY:
+        logger.error(f"[{session_id}][{speaker}] SPEECHMATICS_API_KEY not set")
+        return
+
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+
+    # Map language code to Speechmatics format (2-letter code)
+    lang_map = {
+        "uk-UA": "uk", "en-US": "en", "ru-RU": "ru",
+        "pl-PL": "pl", "hu-HU": "hu", "ro-RO": "ro",
+        "tr-TR": "tr", "cs-CZ": "cs",
+    }
+    sm_lang = lang_map.get(language, "uk")
+
+    url = f"wss://eu2.rt.speechmatics.com/v2/?jwt={SPEECHMATICS_API_KEY}"
+    call_ended = False
+    reconnect_count = 0
+
+    while not call_ended:
+        try:
+            async with websockets.connect(
+                url,
+                additional_headers={"Authorization": f"Bearer {SPEECHMATICS_API_KEY}"},
+                ssl=ssl_ctx,
+                max_size=10 * 1024 * 1024,
+            ) as ws:
+                # Send config
+                start_msg = {
+                    "message": "StartRecognition",
+                    "audio_format": {
+                        "type": "raw",
+                        "encoding": "pcm_s16le",
+                        "sample_rate": 16000,
+                    },
+                    "transcription_config": {
+                        "language": sm_lang,
+                        "enable_partials": True,
+                        "operating_point": "enhanced",
+                        "max_delay": 1.5,              # fast finals (~1.5s after speech)
+                        "max_delay_mode": "flexible",  # finalize at natural sentence boundaries
+                        "punctuation_overrides": {
+                            "permitted_marks": [".", ",", "!", "?"],
+                            "sensitivity": 0.5,
+                        },
+                    },
+                }
+                await ws.send(json.dumps(start_msg))
+
+                # Wait for RecognitionStarted
+                started = False
+                seq_no = 0
+
+                async def send_audio():
+                    nonlocal seq_no, call_ended
+                    while not call_ended:
+                        try:
+                            chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            continue
+                        if chunk is None:
+                            call_ended = True
+                            try:
+                                await ws.send(json.dumps({
+                                    "message": "EndOfStream",
+                                    "last_seq_no": seq_no,
+                                }))
+                            except Exception:
+                                pass
+                            return
+                        try:
+                            await ws.send(chunk)
+                            seq_no += 1
+                        except Exception as e:
+                            logger.error(f"[{session_id}][{speaker}] Speechmatics send error: {e}")
+                            return
+
+                async def recv_transcripts():
+                    nonlocal started
+                    async for msg in ws:
+                        if not isinstance(msg, str):
+                            continue
+                        try:
+                            data = json.loads(msg)
+                        except json.JSONDecodeError:
+                            continue
+                        msg_type = data.get("message")
+
+                        if msg_type == "RecognitionStarted":
+                            started = True
+                            logger.info(f"[{session_id}][{speaker}] Speechmatics stream started (lang={sm_lang})")
+
+                        elif msg_type == "AddPartialTranscript":
+                            text = data.get("metadata", {}).get("transcript", "").strip()
+                            if not text:
+                                continue
+                            try:
+                                await websocket.send_json({
+                                    "type": "transcript",
+                                    "speaker": speaker,
+                                    "text": text,
+                                    "interim": True,
+                                })
+                            except Exception:
+                                pass
+                            # Trigger AI analysis on partial — fast updates without waiting for finals
+                            if callbacks and callbacks.on_partial:
+                                callbacks.on_partial(speaker, text)
+
+                        elif msg_type == "AddTranscript":
+                            text = data.get("metadata", {}).get("transcript", "").strip()
+                            if not text:
+                                continue
+                            if _is_filler_only(text):
+                                logger.info(f"[{session_id}][{speaker}] suppressed filler: {text}")
+                                continue
+                            logger.info(f"[{session_id}][{speaker}] FINAL: {text[:200]}")
+                            try:
+                                await websocket.send_json({
+                                    "type": "transcript",
+                                    "speaker": speaker,
+                                    "text": text,
+                                    "interim": False,
+                                })
+                            except Exception:
+                                pass
+                            # Clear pending partial — final has replaced it
+                            if callbacks and callbacks.on_partial:
+                                callbacks.on_partial(speaker, "")
+                            if callbacks and callbacks.on_transcript:
+                                callbacks.on_transcript(speaker, text, True)
+
+                        elif msg_type == "EndOfTranscript":
+                            return
+
+                        elif msg_type == "Error":
+                            logger.error(f"[{session_id}][{speaker}] Speechmatics error: {data}")
+                            return
+
+                await asyncio.gather(send_audio(), recv_transcripts(), return_exceptions=True)
+                reconnect_count = 0
+
+        except Exception as e:
+            logger.error(f"[{session_id}][{speaker}] Speechmatics stream error: {e}")
+            if call_ended:
+                break
+            reconnect_count += 1
+            if reconnect_count > MAX_RECONNECTS:
+                break
+            await asyncio.sleep(min(0.5 * reconnect_count, 5.0))
+
+    logger.info(f"[{session_id}][{speaker}] Speechmatics stream ended")
+
+
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
 
 @router.websocket("/audio")
@@ -543,6 +882,13 @@ async def audio_ws(websocket: WebSocket):
             session.add_transcript(speaker, text)
             analyzer.on_new_transcript(speaker, text)
 
+    def _on_partial(speaker, text):
+        # Update pending partial — included in transcript for AI
+        session.pending_partial[speaker] = text
+        # Trigger fast analysis with current partial text (debounced)
+        if text:
+            analyzer.on_new_transcript(speaker, text)
+
     def _on_vad_event(speaker, event):
         pass  # VAD events already logged by SpeechDetector
 
@@ -554,6 +900,7 @@ async def audio_ws(websocket: WebSocket):
 
     callbacks = EventCallbacks(
         on_transcript=_on_transcript,
+        on_partial=_on_partial,
         on_vad_event=_on_vad_event,
         on_call_start=_on_call_start,
         on_call_end=_on_call_end,
@@ -573,8 +920,20 @@ async def audio_ws(websocket: WebSocket):
     client_detector = SpeechDetector("client", session_id)
     sales_detector = SpeechDetector("sales", session_id)
 
-    stream_fn = _stream_stt_v2 if STT_ENGINE == "chirp_v2" else _stream_stt_v1
-    logger.info(f"[{session_id}] Using STT engine: {STT_ENGINE}")
+    # Default STT engine — can be overridden by setSttEngine message
+    session.stt_engine = STT_ENGINE
+    logger.info(f"[{session_id}] Default STT engine: {STT_ENGINE}")
+
+    def get_stream_fn():
+        eng = getattr(session, "stt_engine", STT_ENGINE)
+        if eng == "deepgram":
+            return _stream_stt_deepgram
+        elif eng == "speechmatics":
+            return _stream_stt_speechmatics
+        elif eng == "chirp_v2":
+            return _stream_stt_v2
+        else:
+            return _stream_stt_v1
 
     # Lazy-start STT streams — only when first audio arrives for that channel
     stt_tasks: dict[int, asyncio.Task] = {}  # track -> task
@@ -582,17 +941,25 @@ async def audio_ws(websocket: WebSocket):
     speakers = {0: "client", 1: "sales"}
 
     def get_stt_language():
-        """Get STT language code based on session forced language."""
-        fl = session.forced_language
-        if fl and "english" in fl.lower():
-            return "en-US"
-        return "uk-UA"
+        """Get STT language code based on session country."""
+        country_lang = {
+            "UA": "uk-UA",
+            "US": "en-US",
+            "HU": "hu-HU",
+            "PL": "pl-PL",
+            "CZ": "cs-CZ",
+            "TR": "tr-TR",
+            "RO": "ro-RO",
+            "ES": "es-ES",
+        }
+        return country_lang.get(getattr(session, "country", "UA"), "uk-UA")
 
     def ensure_stt(track: int):
         if track not in stt_tasks:
             q = queues[track]
             sp = speakers[track]
             lang = get_stt_language()
+            stream_fn = get_stream_fn()
             stt_tasks[track] = asyncio.create_task(
                 stream_fn(q, sp, websocket, credentials, session_id, callbacks, language=lang)
             )
@@ -685,9 +1052,16 @@ async def audio_ws(websocket: WebSocket):
                         analyzer.trigger_fast()
                     elif msg_type == "setLanguage":
                         lang = data.get("language", "Ukrainian")
+                        country = data.get("country", "UA")
                         session.forced_language = lang
+                        session.country = country
                         analyzer.update_qualification_questions()
-                        logger.info(f"[{session_id}] Language set to: {lang}")
+                        logger.info(f"[{session_id}] Language set to: {lang} (country={country})")
+                    elif msg_type == "setSttEngine":
+                        engine = data.get("engine", STT_ENGINE)
+                        if engine in ("chirp_v2", "latest_long_v1", "deepgram", "speechmatics"):
+                            session.stt_engine = engine
+                            logger.info(f"[{session_id}] STT engine set to: {engine}")
                     elif msg_type == "note":
                         note_text = data.get("text", "")
                         if note_text:

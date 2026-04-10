@@ -22,7 +22,10 @@ class CallSession:
         self.call_start_time: float = time.time()
         self.notes: list = []
         self.locked_summary: list[str] = []
-        self.forced_language: str | None = None  # "English" or "Ukrainian"
+        self.forced_language: str | None = None  # AI language name e.g. "English", "Ukrainian"
+        self.country: str = "UA"  # ISO country code
+        self.stt_engine: str | None = None  # "chirp_v2", "latest_long_v1", "deepgram"
+        self.pending_partial: dict[str, str] = {}  # speaker → latest interim text
 
     def add_transcript(self, speaker: str, text: str) -> None:
         mapped = SPEAKER_MAP.get(speaker, speaker)
@@ -52,9 +55,13 @@ class CallSession:
         logger.info(f"[{self.session_id}] Added transcript: [{mapped}]: \"{text[:120]}\"")
 
     def get_transcript_text(self) -> str:
-        return "\n".join(
-            f"[{e['speaker']}]: {e['text']}" for e in self.conversation
-        )
+        lines = [f"[{e['speaker']}]: {e['text']}" for e in self.conversation]
+        # Append pending interim transcripts so AI can react before finals arrive
+        for sp, text in self.pending_partial.items():
+            if text:
+                mapped = SPEAKER_MAP.get(sp, sp)
+                lines.append(f"[{mapped}]: {text}")
+        return "\n".join(lines)
 
     def update_profile(self, fields: dict) -> None:
         for k, v in fields.items():
