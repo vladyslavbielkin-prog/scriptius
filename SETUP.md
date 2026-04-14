@@ -81,35 +81,42 @@ cp server/.env.example server/.env
 
 ---
 
-## Крок 7 — Запустити сервер
+## Крок 7 — Запустити (потрібно 3 Terminal вікна)
+
+Для роботи потрібні 3 Terminal вікна (або вкладки):
+
+| Terminal | Процес | Що робить |
+|----------|--------|-----------|
+| 1 | Сервер | Бекенд + роздає UI |
+| 2 | Desktop Agent | Захоплює системне аудіо |
+| 3 | Вільний | Git, редагування, копіювання файлів |
+
+### Terminal 1 — Сервер
 
 ```bash
-cd server
+cd scriptius/server
+source ../venv/bin/activate
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Побачиш: `Uvicorn running on http://0.0.0.0:8000` — сервер працює.
+Побачиш: `Uvicorn running on http://0.0.0.0:8000` — сервер працює. Залиш відкритим.
 
-Залиш цей Terminal відкритим.
-
----
-
-## Крок 8 — Запустити Desktop Agent
-
-Відкрий **другий Terminal** і виконай:
+### Terminal 2 — Desktop Agent
 
 ```bash
 cd scriptius/scriptius-native
 .build/release/ScriptiusAudio --server
 ```
 
-Побачиш: `[Server] Listening on ws://localhost:9001` — агент готовий.
+Побачиш: `[Server] Listening on ws://localhost:9001` — агент готовий. Залиш відкритим.
 
-Залиш цей Terminal відкритим.
+### Terminal 3 — Робочий
+
+Використовуй для git, редагування файлів, копіювання webapp → server/public тощо.
 
 ---
 
-## Крок 9 — Відкрити Scriptius
+## Крок 8 — Відкрити Scriptius
 
 Відкрий у браузері: **http://localhost:8000**
 
@@ -117,7 +124,7 @@ cd scriptius/scriptius-native
 2. Натисни **Start**
 3. Транскрипція почнеться автоматично
 
-Для роботи потрібні обидва процеси: сервер (крок 7) і агент (крок 8).
+Для роботи потрібні обидва процеси: сервер (Terminal 1) і агент (Terminal 2).
 
 ---
 
